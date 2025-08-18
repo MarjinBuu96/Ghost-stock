@@ -1,0 +1,57 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  // For local dev we’ll use SQLite. Your .env should have: DATABASE_URL="file:./dev.db"
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Alert {
+  id        String @id @default(cuid())
+  userEmail String
+
+  // Relation to Store (required)
+  storeId String
+  store   Store  @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  sku         String
+  product     String
+  systemQty   Int
+  expectedMin Int
+  expectedMax Int
+  severity    String // "high" | "med"
+  status      String   @default("open")
+  createdAt   DateTime @default(now())
+
+  // Daily dedupe key (e.g., "SKU|severity|YYYY-MM-DD")
+  uniqueHash String
+
+  @@unique([storeId, uniqueHash])
+  @@index([userEmail, status])
+  @@index([storeId, status])
+}
+
+model Store {
+  id          String   @id @default(cuid())
+  userEmail   String
+  shop        String   @unique // e.g., my-shop.myshopify.com
+  accessToken String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  alerts Alert[]
+
+  @@index([userEmail])
+}
+
+model UserSettings {
+  id        String   @id @default(cuid())
+  userEmail String   @unique
+  currency  String   @default("USD")
+  plan      String   @default("free") // free | starter | pro
+  stripeCustomerId String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
