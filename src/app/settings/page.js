@@ -1,10 +1,10 @@
 "use client";
 
 import useSWR from "swr";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 const fetcher = async (u) => {
-  const r = await fetch(u);
+  const r = await fetch(u, { cache: "no-store" });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(j?.error || `HTTP ${r.status}`);
   return j;
@@ -13,11 +13,11 @@ const fetcher = async (u) => {
 export default function SettingsPage() {
   // Shopify connect form
   const [shop, setShop] = useState("");
-  function startInstall(e) {
+  const startInstall = (e) => {
     e.preventDefault();
     if (!shop) return;
     window.location.href = `/api/shopify/install?shop=${encodeURIComponent(shop)}`;
-  }
+  };
 
   // Load settings
   const { data, error, isLoading, mutate } = useSWR("/api/settings", fetcher);
@@ -28,24 +28,34 @@ export default function SettingsPage() {
   const normalizedPlan = ["free", "starter", "pro", "enterprise"].includes(planRaw)
     ? planRaw
     : "starter";
-
   const isStarter = normalizedPlan === "starter";
   const canUseIntegrations = normalizedPlan === "pro" || normalizedPlan === "enterprise";
 
-  const currency = settings?.currency || "GBP";
-  const [saving, setSaving] = useState(false);
-  const [busy, setBusy] = useState(false);
+  // Form state (explicit save)
+  const [slackUrl, setSlackUrl] = useState("");
+  const [notificationEmail, setNotificationEmail] = useState("");
+  const [currencySaving, setCurrencySaving] = useState(false);
+  const [saveBusy, setSaveBusy] = useState(false);
+  const [billingBusy, setBillingBusy] = useState(false);
   const [toast, setToast] = useState("");
+
+  // Hydrate form fields when settings load
+  useEffect(() => {
+    setSlackUrl(settings?.slackWebhookUrl || "");
+    setNotificationEmail(settings?.notificationEmail || "");
+  }, [settings?.slackWebhookUrl, settings?.notificationEmail]);
+
+  const currency = settings?.currency || "GBP";
 
   function notify(msg) {
     setToast(msg);
-    clearTimeout(notify._t);
-    notify._t = setTimeout(() => setToast(""), 3000);
+    clearTimeout((notify)._t);
+    (notify)._t = setTimeout(() => setToast(""), 3000);
   }
 
   async function changeCurrency(newCcy) {
     try {
-      setSaving(true);
+      setCurrencySaving(true);
       const res = await fetch("/api/settings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -57,43 +67,49 @@ export default function SettingsPage() {
     } catch {
       notify("Could not update currency");
     } finally {
-      setSaving(false);
+      setCurrencySaving(false);
     }
   }
 
-  async function saveSlackWebhook(url) {
+  async function saveSlack() {
     try {
+      setSaveBusy(true);
       const res = await fetch("/api/settings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ slackWebhookUrl: url }),
+        body: JSON.stringify({ slackWebhookUrl: slackUrl }),
       });
       if (!res.ok) throw new Error("Failed");
       await mutate();
-      notify(url ? "Slack webhook saved" : "Slack webhook cleared");
+      notify(slackUrl ? "Slack webhook saved" : "Slack webhook cleared");
     } catch {
       notify("Could not save Slack webhook");
+    } finally {
+      setSaveBusy(false);
     }
   }
 
-  async function saveNotificationEmail(email) {
+  async function saveEmail() {
     try {
+      setSaveBusy(true);
       const res = await fetch("/api/settings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ notificationEmail: email }),
+        body: JSON.stringify({ notificationEmail }),
       });
       if (!res.ok) throw new Error("Failed");
       await mutate();
-      notify(email ? "Notification email saved" : "Notification email cleared");
+      notify(notificationEmail ? "Notification email saved" : "Notification email cleared");
     } catch {
       notify("Could not save notification email");
+    } finally {
+      setSaveBusy(false);
     }
   }
 
   async function goCheckoutPlan(plan) {
     try {
-      setBusy(true);
+      setBillingBusy(true);
       const res = await fetch("/api/billing/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -104,20 +120,20 @@ export default function SettingsPage() {
       window.location.href = json.url;
     } catch {
       notify("Checkout failed");
-      setBusy(false);
+      setBillingBusy(false);
     }
   }
 
   async function goPortal() {
     try {
-      setBusy(true);
+      setBillingBusy(true);
       const res = await fetch("/api/billing/portal", { method: "POST" });
       const json = await res.json().catch(() => ({}));
       if (!res.ok || !json?.url) throw new Error(json?.error || "Portal failed");
       window.location.href = json.url;
     } catch {
       notify("Could not open billing portal");
-      setBusy(false);
+      setBillingBusy(false);
     }
   }
 
@@ -173,7 +189,7 @@ export default function SettingsPage() {
             {showUpgradeStarter && (
               <button
                 onClick={() => goCheckoutPlan("starter")}
-                disabled={busy}
+                disabled={billingBusy}
                 className="rounded bg-emerald-500 hover:bg-emerald-600 text-black px-3 py-2 text-sm font-semibold disabled:opacity-60"
               >
                 Upgrade to Starter
@@ -182,7 +198,7 @@ export default function SettingsPage() {
             {showUpgradePro && (
               <button
                 onClick={() => goCheckoutPlan("pro")}
-                disabled={busy}
+                disabled={billingBusy}
                 className="rounded bg-indigo-500 hover:bg-indigo-600 text-black px-3 py-2 text-sm font-semibold disabled:opacity-60"
               >
                 Upgrade to Pro
@@ -191,7 +207,7 @@ export default function SettingsPage() {
             {showUpgradeEnterprise && (
               <button
                 onClick={() => goCheckoutPlan("enterprise")}
-                disabled={busy}
+                disabled={billingBusy}
                 className="rounded bg-purple-500 hover:bg-purple-600 text-black px-3 py-2 text-sm font-semibold disabled:opacity-60"
               >
                 Upgrade to Enterprise
@@ -199,7 +215,7 @@ export default function SettingsPage() {
             )}
             <button
               onClick={goPortal}
-              disabled={busy}
+              disabled={billingBusy}
               className="rounded bg-gray-700 hover:bg-gray-600 px-3 py-2 text-sm font-semibold disabled:opacity-60"
             >
               Manage Billing
@@ -214,10 +230,10 @@ export default function SettingsPage() {
         </ul>
       </section>
 
-      {/* Integrations — always visible; locked on Starter */}
+      {/* Integrations — kept visible; locked on Starter */}
       <section className="mb-8 rounded border border-gray-700 bg-gray-900 p-5">
         <h3 className="text-xl font-semibold">Integrations</h3>
-        <p className="text-sm text-gray-400">Send alerts to Slack and by Email.</p>
+        <p className="text-sm text-gray-400">Receive alerts via Slack or Email.</p>
 
         {/* Slack */}
         <div className={`mt-4 space-y-2 ${isStarter ? "opacity-60" : ""}`}>
@@ -233,25 +249,34 @@ export default function SettingsPage() {
             <input
               className="flex-1 bg-gray-800 rounded px-3 py-2 text-sm"
               placeholder="https://hooks.slack.com/services/XXX/YYY/ZZZ"
-              value={settings?.slackWebhookUrl || ""}
-              onChange={(e) => saveSlackWebhook(e.target.value)}
+              value={slackUrl}
+              onChange={(e) => setSlackUrl(e.target.value)}
               disabled={isLoading || !canUseIntegrations}
             />
+            <button
+              onClick={saveSlack}
+              disabled={!canUseIntegrations || saveBusy}
+              className="rounded bg-gray-700 hover:bg-gray-600 px-3 py-2 text-sm font-semibold disabled:opacity-60"
+            >
+              Save
+            </button>
             <button
               onClick={async () => {
                 const r = await fetch("/api/integrations/slack/test", { method: "POST" });
                 alert(r.ok ? "Alert sent to Slack ✅" : "Slack alert failed");
               }}
+              disabled={!canUseIntegrations || !slackUrl}
               className="rounded bg-gray-700 hover:bg-gray-600 px-3 py-2 text-sm font-semibold disabled:opacity-60"
-              disabled={!canUseIntegrations}
             >
               Send alert
             </button>
           </div>
           {!canUseIntegrations && (
             <div className="text-xs text-gray-400">
-              Upgrade to <button className="underline" onClick={() => goCheckoutPlan("pro")}>Pro</button> or{" "}
-              <button className="underline" onClick={() => goCheckoutPlan("enterprise")}>Enterprise</button> to enable Slack alerts.
+              Upgrade to{" "}
+              <button className="underline" onClick={() => goCheckoutPlan("pro")}>Pro</button> or{" "}
+              <button className="underline" onClick={() => goCheckoutPlan("enterprise")}>Enterprise</button>{" "}
+              to enable Slack alerts.
             </div>
           )}
         </div>
@@ -270,25 +295,34 @@ export default function SettingsPage() {
             <input
               className="flex-1 bg-gray-800 rounded px-3 py-2 text-sm"
               placeholder="alerts@yourcompany.com"
-              value={settings?.notificationEmail || ""}
-              onChange={(e) => saveNotificationEmail(e.target.value)}
+              value={notificationEmail}
+              onChange={(e) => setNotificationEmail(e.target.value)}
               disabled={isLoading || !canUseIntegrations}
             />
+            <button
+              onClick={saveEmail}
+              disabled={!canUseIntegrations || saveBusy}
+              className="rounded bg-gray-700 hover:bg-gray-600 px-3 py-2 text-sm font-semibold disabled:opacity-60"
+            >
+              Save
+            </button>
             <button
               onClick={async () => {
                 const r = await fetch("/api/integrations/email/test", { method: "POST" });
                 alert(r.ok ? "Alert sent by email ✅" : "Email alert failed");
               }}
+              disabled={!canUseIntegrations || !notificationEmail}
               className="rounded bg-gray-700 hover:bg-gray-600 px-3 py-2 text-sm font-semibold disabled:opacity-60"
-              disabled={!canUseIntegrations}
             >
               Send alert
             </button>
           </div>
           {!canUseIntegrations && (
             <div className="text-xs text-gray-400">
-              Upgrade to <button className="underline" onClick={() => goCheckoutPlan("pro")}>Pro</button> or{" "}
-              <button className="underline" onClick={() => goCheckoutPlan("enterprise")}>Enterprise</button> to enable email alerts.
+              Upgrade to{" "}
+              <button className="underline" onClick={() => goCheckoutPlan("pro")}>Pro</button> or{" "}
+              <button className="underline" onClick={() => goCheckoutPlan("enterprise")}>Enterprise</button>{" "}
+              to enable email alerts.
             </div>
           )}
         </div>
@@ -298,12 +332,14 @@ export default function SettingsPage() {
       <section className="rounded border border-gray-700 bg-gray-900 p-5 mt-8">
         <h3 className="text-xl font-semibold">Preferences</h3>
         <div className="mt-4 flex items-center gap-3">
-          <label htmlFor="currency" className="text-sm text-gray-400 w-28">Currency</label>
+          <label htmlFor="currency" className="text-sm text-gray-400 w-28">
+            Currency
+          </label>
           <select
             id="currency"
             value={currency}
             onChange={(e) => changeCurrency(e.target.value)}
-            disabled={isLoading || saving}
+            disabled={isLoading || currencySaving}
             className="bg-gray-800 rounded px-3 py-2 text-sm disabled:opacity-60"
           >
             <option value="GBP">GBP</option>
@@ -313,7 +349,7 @@ export default function SettingsPage() {
             <option value="CAD">CAD</option>
             <option value="NZD">NZD</option>
           </select>
-          {saving && <span className="text-xs text-gray-400">Saving…</span>}
+          {currencySaving && <span className="text-xs text-gray-400">Saving…</span>}
         </div>
         <p className="text-xs text-gray-500 mt-3">
           Affects how amounts are displayed (e.g., at-risk revenue).
@@ -324,7 +360,7 @@ export default function SettingsPage() {
       <details className="mt-8">
         <summary className="cursor-pointer text-sm text-gray-400">Debug</summary>
         <pre className="mt-2 text-xs text-gray-300 bg-gray-800 rounded p-3 overflow-auto">
-{JSON.stringify({ isLoading, settings, normalizedPlan }, null, 2)}
+{JSON.stringify({ isLoading, settings, normalizedPlan, slackUrl, notificationEmail }, null, 2)}
         </pre>
       </details>
     </main>
