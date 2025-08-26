@@ -1,4 +1,5 @@
 import Credentials from "next-auth/providers/credentials";
+import { prisma } from "@/lib/prisma";
 
 export const authOptions = {
   secret: process.env.NEXTAUTH_SECRET,
@@ -22,13 +23,38 @@ export const authOptions = {
   ],
   pages: { signIn: "/login" },
   session: { strategy: "jwt" },
+
   callbacks: {
+    // Keep your token shaping
     async jwt({ token, user }) {
       if (user) token.user = { email: user.email, name: user.name };
       return token;
     },
+
+    // 🔑 Enrich the session with plan from Prisma.UserSettings
     async session({ session, token }) {
-      if (token?.user) session.user = token.user;
+      if (token?.user) {
+        session.user = token.user;
+        const email = token.user.email;
+
+        try {
+          const settings = email
+            ? await prisma.userSettings.findUnique({ where: { userEmail: email } })
+            : null;
+
+          // Normalize: treat "free" as "starter"
+          const plan = settings?.plan === "free"
+            ? "starter"
+            : (settings?.plan || "starter");
+
+          session.user.planTier = plan;                 // <-- use this to gate features
+          session.user.stripeCustomerId = settings?.stripeCustomerId || null;
+        } catch (e) {
+          // On any DB error, fall back to starter
+          session.user.planTier = "starter";
+          session.user.stripeCustomerId = null;
+        }
+      }
       return session;
     },
   },

@@ -1,21 +1,29 @@
+// src/app/api/me/stores/route.js
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/authOptions"; // if alias doesn't work: "../../../lib/authOptions"
-import { prisma } from "@/lib/prisma";           // or "../../../lib/prisma"
+import { getActiveStore } from "@/lib/getActiveStore";
 
-export async function GET() {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.email) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+export async function GET(req) {
+  const store = await getActiveStore(req);
+
+  // Return 200 with empty array so the UI doesn’t show a scary error banner
+  if (!store) {
+    return NextResponse.json({ stores: [] }, { status: 200, headers: { "Cache-Control": "no-store" } });
   }
 
-  const stores = await prisma.store.findMany({
-    where: { userEmail: session.user.email },
-    select: { id: true, shop: true, createdAt: true, updatedAt: true },
-    orderBy: { createdAt: "desc" },
-  });
-
-  return NextResponse.json({ stores });
+  return NextResponse.json(
+    {
+      stores: [
+        {
+          id: store.id,
+          shop: store.shop,
+          createdAt: store.createdAt,
+          updatedAt: store.updatedAt,
+        },
+      ],
+    },
+    { status: 200, headers: { "Cache-Control": "no-store" } }
+  );
 }

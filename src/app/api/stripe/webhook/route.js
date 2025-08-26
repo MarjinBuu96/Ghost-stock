@@ -4,8 +4,9 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { prisma } from "@/lib/prisma";
+import { planFromPriceId, PLAN } from "@/lib/stripePlans";
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: "2024-06-20" });
 
 export async function POST(req) {
   const sig = req.headers.get("stripe-signature");
@@ -18,40 +19,66 @@ export async function POST(req) {
     return new NextResponse(`Webhook Error: ${err.message}`, { status: 400 });
   }
 
-  // Handle subscription events
-  if (event.type === "customer.subscription.updated" || event.type === "customer.subscription.created") {
-    const sub = event.data.object;
-    const customerId = sub.customer;
+  try {
+    switch (event.type) {
+      case "customer.subscription.created":
+      case "customer.subscription.updated": {
+        const sub = event.data.object;
 
-    // get email from customer
-    const customer = await stripe.customers.retrieve(customerId);
-    const email = customer.email;
-    if (email) {
-      // infer plan from price
-      const priceId = sub.items?.data?.[0]?.price?.id || "";
-      let plan = "starter";
-      if (priceId === process.env.STRIPE_PRICE_PRO) plan = "pro";
+        const customerId = sub.customer;
+        // Choose the “active” price — first item is fine for 1-seat subs
+        const priceId = sub.items?.data?.[0]?.price?.id || null;
+        const plan = planFromPriceId(priceId);
 
-      await prisma.userSettings.upsert({
-        where: { userEmail: email },
-        update: { plan, stripeCustomerId: customerId },
-        create: { userEmail: email, plan, stripeCustomerId: customerId },
-      });
+        // Prefer linking by stripeCustomerId (already stored), but fall back to email if needed
+        let whereByCustomer = await prisma.userSettings.findFirst({
+          where: { stripeCustomerId: customerId },
+          select: { userEmail: true },
+        });
+
+        if (!whereByCustomer) {
+          // Try email lookup (if customer has one)
+          const customer = await stripe.customers.retrieve(customerId);
+          const email = typeof customer === "object" ? customer.email : null;
+          if (email) {
+            await prisma.userSettings.upsert({
+              where: { userEmail: email },
+              update: { plan: plan, stripeCustomerId: customerId },
+              create: { userEmail: email, plan: plan, stripeCustomerId: customerId },
+            });
+          }
+        } else {
+          await prisma.userSettings.update({
+            where: { userEmail: whereByCustomer.userEmail },
+            data: { plan: plan },
+          });
+        }
+        break;
+      }
+
+      case "customer.subscription.deleted": {
+        const sub = event.data.object;
+        const customerId = sub.customer;
+
+        // Downgrade to starter on cancel/expired
+        await prisma.userSettings.updateMany({
+          where: { stripeCustomerId: customerId },
+          data: { plan: PLAN.STARTER },
+        });
+        break;
+      }
+
+      // Optional: treat invoice payment_failed as soft lock or warning
+      // case "invoice.payment_failed": { /* decide if you want to react */ break; }
+
+      default:
+        // No-op for other events
+        break;
     }
-  }
 
-  if (event.type === "customer.subscription.deleted") {
-    const sub = event.data.object;
-    const customerId = sub.customer;
-    // Find user by customer id
-    const settings = await prisma.userSettings.findFirst({ where: { stripeCustomerId: customerId } });
-    if (settings) {
-      await prisma.userSettings.update({
-        where: { userEmail: settings.userEmail },
-        data: { plan: "free" },
-      });
-    }
+    return NextResponse.json({ received: true });
+  } catch (e) {
+    console.error("Webhook handling error:", e);
+    return NextResponse.json({ error: "server error" }, { status: 500 });
   }
-
-  return NextResponse.json({ received: true });
 }

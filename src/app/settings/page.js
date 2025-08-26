@@ -5,11 +5,9 @@ import { useState } from "react";
 
 const fetcher = async (u) => {
   const r = await fetch(u);
-  let json = {};
-  try { json = await r.json(); } catch {}
-  // Don't crash the UI—return an object that includes status so we can render a nice message
-  if (!r.ok) return { __error: true, status: r.status, body: json };
-  return json;
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j?.error || `HTTP ${r.status}`);
+  return j;
 };
 
 export default function SettingsPage() {
@@ -17,26 +15,32 @@ export default function SettingsPage() {
   const [shop, setShop] = useState("");
   function startInstall(e) {
     e.preventDefault();
+    if (!shop) return;
     window.location.href = `/api/shopify/install?shop=${encodeURIComponent(shop)}`;
   }
 
-  // Settings (plan + currency)
-  const { data: settingsResp, isLoading, mutate } = useSWR("/api/settings", fetcher);
-  const hasApiError = settingsResp?.__error;
-  const apiStatus = settingsResp?.status;
-  const apiBody = settingsResp?.body;
+  // Load settings
+  const { data, error, isLoading, mutate } = useSWR("/api/settings", fetcher);
+  const settings = data?.settings || {};
 
-  const settings = settingsResp?.settings;
-  const plan = settings?.plan ?? "free";
-  const currency = settings?.currency ?? "USD";
+  // Plan handling
+  const planRaw = String(settings?.plan || "starter").toLowerCase();
+  const normalizedPlan = ["free", "starter", "pro", "enterprise"].includes(planRaw)
+    ? planRaw
+    : "starter";
 
+  const isStarter = normalizedPlan === "starter";
+  const canUseIntegrations = normalizedPlan === "pro" || normalizedPlan === "enterprise";
+
+  const currency = settings?.currency || "GBP";
   const [saving, setSaving] = useState(false);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState("");
 
   function notify(msg) {
     setToast(msg);
-    setTimeout(() => setToast(""), 3000);
+    clearTimeout(notify._t);
+    notify._t = setTimeout(() => setToast(""), 3000);
   }
 
   async function changeCurrency(newCcy) {
@@ -47,30 +51,58 @@ export default function SettingsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ currency: newCcy }),
       });
-      if (!res.ok) throw new Error("Failed to save currency");
+      if (!res.ok) throw new Error("Failed");
       await mutate();
       notify("Currency updated");
-    } catch (e) {
-      console.error(e);
+    } catch {
       notify("Could not update currency");
     } finally {
       setSaving(false);
     }
   }
 
-  async function goCheckout(priceId) {
+  async function saveSlackWebhook(url) {
+    try {
+      const res = await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ slackWebhookUrl: url }),
+      });
+      if (!res.ok) throw new Error("Failed");
+      await mutate();
+      notify(url ? "Slack webhook saved" : "Slack webhook cleared");
+    } catch {
+      notify("Could not save Slack webhook");
+    }
+  }
+
+  async function saveNotificationEmail(email) {
+    try {
+      const res = await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ notificationEmail: email }),
+      });
+      if (!res.ok) throw new Error("Failed");
+      await mutate();
+      notify(email ? "Notification email saved" : "Notification email cleared");
+    } catch {
+      notify("Could not save notification email");
+    }
+  }
+
+  async function goCheckoutPlan(plan) {
     try {
       setBusy(true);
       const res = await fetch("/api/billing/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ priceId }),
+        body: JSON.stringify({ plan }), // "starter" | "pro" | "enterprise"
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok || !json?.url) throw new Error(json?.error || "Checkout failed");
       window.location.href = json.url;
-    } catch (e) {
-      console.error(e);
+    } catch {
       notify("Checkout failed");
       setBusy(false);
     }
@@ -83,63 +115,33 @@ export default function SettingsPage() {
       const json = await res.json().catch(() => ({}));
       if (!res.ok || !json?.url) throw new Error(json?.error || "Portal failed");
       window.location.href = json.url;
-    } catch (e) {
-      console.error(e);
+    } catch {
       notify("Could not open billing portal");
       setBusy(false);
     }
   }
 
-  // Supply your Stripe price IDs via NEXT_PUBLIC_ envs or temporarily hardcode here
-  const PRICE_STARTER = process.env.NEXT_PUBLIC_PRICE_STARTER || "price_1Rx5duAcmGB5xexhvJ1ZkWRR";
-  const PRICE_PRO = process.env.NEXT_PUBLIC_PRICE_PRO || "price_1Rx5duAcmGB5xexhvJ1ZkWRR";
+  const showUpgradeStarter = normalizedPlan !== "starter";
+  const showUpgradePro = normalizedPlan !== "pro";
+  const showUpgradeEnterprise = normalizedPlan !== "enterprise";
 
   return (
     <main className="min-h-screen px-6 py-10 max-w-3xl mx-auto text-white">
       <h2 className="text-3xl font-bold mb-6">Settings</h2>
 
-      {toast && (
-        <div className="mb-4 rounded bg-gray-800 px-4 py-2 text-sm">{toast}</div>
-      )}
+      {toast && <div className="mb-4 rounded bg-gray-800 px-4 py-2 text-sm">{toast}</div>}
 
-      {/* Clear error banners that never hide the rest of the page */}
-      {hasApiError && apiStatus === 401 && (
-        <div className="mb-6 rounded border border-yellow-700 bg-yellow-900/30 p-4">
-          <p className="text-yellow-200">You’re not signed in.</p>
-          <a href="/login?callbackUrl=/settings" className="underline text-yellow-100">
-            Sign in to manage your settings →
-          </a>
-        </div>
-      )}
-
-      {hasApiError && apiStatus === 405 && (
-        <div className="mb-6 rounded border border-red-700 bg-red-900/30 p-4">
-          <p className="text-red-200 font-semibold">/api/settings returned 405 (Method Not Allowed).</p>
-          <p className="text-red-200 text-sm mt-1">
-            Make sure you have <code>src/app/api/settings/route.js</code> exporting <code>GET</code> and <code>POST</code>.
-          </p>
-          <pre className="text-xs text-red-200/80 overflow-auto mt-2">
-{`export async function GET() { /* ... */ }
-export async function POST(req) { /* ... */ }`}
-          </pre>
-        </div>
-      )}
-
-      {hasApiError && apiStatus !== 401 && apiStatus !== 405 && (
+      {error && (
         <div className="mb-6 rounded border border-red-700 bg-red-900/30 p-4">
           <p className="text-red-200 font-semibold">Could not load settings</p>
-          <pre className="text-xs text-red-200/80 overflow-auto mt-2">
-            {JSON.stringify({ status: apiStatus, body: apiBody }, null, 2)}
-          </pre>
+          <p className="text-xs text-red-200/80 mt-2">{String(error.message)}</p>
         </div>
       )}
 
       {/* Shopify connection */}
       <section className="bg-gray-800 p-6 rounded space-y-4 mb-8 border border-gray-700">
         <h3 className="text-xl font-semibold">Shopify</h3>
-        <p className="text-sm text-gray-400">
-          Connect your Shopify store to enable live scans and alerts.
-        </p>
+        <p className="text-sm text-gray-400">Connect your Shopify store to enable live scans and alerts.</p>
         <form onSubmit={startInstall} className="space-y-3">
           <label className="block text-sm" htmlFor="shop-input">
             Shop domain (e.g. <span className="opacity-80">my-store.myshopify.com</span>)
@@ -159,32 +161,42 @@ export async function POST(req) { /* ... */ }`}
       </section>
 
       {/* Subscription */}
-      <section className="mb-8 rounded border border-gray-700 bg-gray-900 p-5">
+      <section id="billing" className="mb-8 rounded border border-gray-700 bg-gray-900 p-5">
         <div className="flex items-start justify-between gap-4">
           <div>
             <h3 className="text-xl font-semibold">Subscription</h3>
             <p className="text-gray-400 text-sm mt-1">
-              Current plan:{" "}
-              <span className="font-medium uppercase">
-                {isLoading ? "…" : plan}
-              </span>
+              Current plan: <span className="font-medium uppercase">{isLoading ? "…" : normalizedPlan}</span>
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <button
-              onClick={() => goCheckout(PRICE_STARTER)}
-              disabled={busy}
-              className="rounded bg-emerald-500 hover:bg-emerald-600 text-black px-3 py-2 text-sm font-semibold disabled:opacity-60"
-            >
-              Upgrade to Starter
-            </button>
-            <button
-              onClick={() => goCheckout(PRICE_PRO)}
-              disabled={busy}
-              className="rounded bg-indigo-500 hover:bg-indigo-600 text-black px-3 py-2 text-sm font-semibold disabled:opacity-60"
-            >
-              Upgrade to Pro
-            </button>
+            {showUpgradeStarter && (
+              <button
+                onClick={() => goCheckoutPlan("starter")}
+                disabled={busy}
+                className="rounded bg-emerald-500 hover:bg-emerald-600 text-black px-3 py-2 text-sm font-semibold disabled:opacity-60"
+              >
+                Upgrade to Starter
+              </button>
+            )}
+            {showUpgradePro && (
+              <button
+                onClick={() => goCheckoutPlan("pro")}
+                disabled={busy}
+                className="rounded bg-indigo-500 hover:bg-indigo-600 text-black px-3 py-2 text-sm font-semibold disabled:opacity-60"
+              >
+                Upgrade to Pro
+              </button>
+            )}
+            {showUpgradeEnterprise && (
+              <button
+                onClick={() => goCheckoutPlan("enterprise")}
+                disabled={busy}
+                className="rounded bg-purple-500 hover:bg-purple-600 text-black px-3 py-2 text-sm font-semibold disabled:opacity-60"
+              >
+                Upgrade to Enterprise
+              </button>
+            )}
             <button
               onClick={goPortal}
               disabled={busy}
@@ -196,23 +208,102 @@ export async function POST(req) { /* ... */ }`}
         </div>
 
         <ul className="mt-4 text-sm text-gray-300 list-disc pl-5 space-y-1">
-          <li><span className="font-medium">Starter:</span> Email alerts, manual scans, dashboard KPIs.</li>
-          <li><span className="font-medium">Pro:</span> Slack/Teams alerts, auto-scans, webhooks, export.</li>
+          <li><span className="font-medium">Starter:</span> Manual scans, dashboard KPIs, CSV export.</li>
+          <li><span className="font-medium">Pro:</span> Auto-scans, Slack/Teams, multi-store (basic).</li>
+          <li><span className="font-medium">Enterprise:</span> Unified dashboards, webhooks/Zapier, SSO.</li>
         </ul>
       </section>
 
-      {/* Preferences (Currency) */}
-      <section className="rounded border border-gray-700 bg-gray-900 p-5">
+      {/* Integrations — always visible; locked on Starter */}
+      <section className="mb-8 rounded border border-gray-700 bg-gray-900 p-5">
+        <h3 className="text-xl font-semibold">Integrations</h3>
+        <p className="text-sm text-gray-400">Send alerts to Slack and by Email.</p>
+
+        {/* Slack */}
+        <div className={`mt-4 space-y-2 ${isStarter ? "opacity-60" : ""}`}>
+          <div className="flex items-center justify-between">
+            <label className="text-sm text-gray-300">Slack Incoming Webhook</label>
+            {isStarter && (
+              <span className="text-xs bg-yellow-800 text-yellow-100 px-2 py-1 rounded">
+                Locked (Starter)
+              </span>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <input
+              className="flex-1 bg-gray-800 rounded px-3 py-2 text-sm"
+              placeholder="https://hooks.slack.com/services/XXX/YYY/ZZZ"
+              value={settings?.slackWebhookUrl || ""}
+              onChange={(e) => saveSlackWebhook(e.target.value)}
+              disabled={isLoading || !canUseIntegrations}
+            />
+            <button
+              onClick={async () => {
+                const r = await fetch("/api/integrations/slack/test", { method: "POST" });
+                alert(r.ok ? "Alert sent to Slack ✅" : "Slack alert failed");
+              }}
+              className="rounded bg-gray-700 hover:bg-gray-600 px-3 py-2 text-sm font-semibold disabled:opacity-60"
+              disabled={!canUseIntegrations}
+            >
+              Send alert
+            </button>
+          </div>
+          {!canUseIntegrations && (
+            <div className="text-xs text-gray-400">
+              Upgrade to <button className="underline" onClick={() => goCheckoutPlan("pro")}>Pro</button> or{" "}
+              <button className="underline" onClick={() => goCheckoutPlan("enterprise")}>Enterprise</button> to enable Slack alerts.
+            </div>
+          )}
+        </div>
+
+        {/* Email */}
+        <div className={`mt-6 space-y-2 ${isStarter ? "opacity-60" : ""}`}>
+          <div className="flex items-center justify-between">
+            <label className="text-sm text-gray-300">Notification Email</label>
+            {isStarter && (
+              <span className="text-xs bg-yellow-800 text-yellow-100 px-2 py-1 rounded">
+                Locked (Starter)
+              </span>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <input
+              className="flex-1 bg-gray-800 rounded px-3 py-2 text-sm"
+              placeholder="alerts@yourcompany.com"
+              value={settings?.notificationEmail || ""}
+              onChange={(e) => saveNotificationEmail(e.target.value)}
+              disabled={isLoading || !canUseIntegrations}
+            />
+            <button
+              onClick={async () => {
+                const r = await fetch("/api/integrations/email/test", { method: "POST" });
+                alert(r.ok ? "Alert sent by email ✅" : "Email alert failed");
+              }}
+              className="rounded bg-gray-700 hover:bg-gray-600 px-3 py-2 text-sm font-semibold disabled:opacity-60"
+              disabled={!canUseIntegrations}
+            >
+              Send alert
+            </button>
+          </div>
+          {!canUseIntegrations && (
+            <div className="text-xs text-gray-400">
+              Upgrade to <button className="underline" onClick={() => goCheckoutPlan("pro")}>Pro</button> or{" "}
+              <button className="underline" onClick={() => goCheckoutPlan("enterprise")}>Enterprise</button> to enable email alerts.
+            </div>
+          )}
+        </div>
+      </section>
+
+      {/* Preferences */}
+      <section className="rounded border border-gray-700 bg-gray-900 p-5 mt-8">
         <h3 className="text-xl font-semibold">Preferences</h3>
         <div className="mt-4 flex items-center gap-3">
-          <label htmlFor="currency" className="text-sm text-gray-400 w-28">
-            Currency
-          </label>
+          <label htmlFor="currency" className="text-sm text-gray-400 w-28">Currency</label>
           <select
             id="currency"
             value={currency}
             onChange={(e) => changeCurrency(e.target.value)}
-            disabled={isLoading || saving || hasApiError}
+            disabled={isLoading || saving}
             className="bg-gray-800 rounded px-3 py-2 text-sm disabled:opacity-60"
           >
             <option value="GBP">GBP</option>
@@ -225,7 +316,7 @@ export async function POST(req) { /* ... */ }`}
           {saving && <span className="text-xs text-gray-400">Saving…</span>}
         </div>
         <p className="text-xs text-gray-500 mt-3">
-          Affects how amounts are displayed (e.g., at-risk revenue). We can enable FX conversion later.
+          Affects how amounts are displayed (e.g., at-risk revenue).
         </p>
       </section>
 
@@ -233,17 +324,7 @@ export async function POST(req) { /* ... */ }`}
       <details className="mt-8">
         <summary className="cursor-pointer text-sm text-gray-400">Debug</summary>
         <pre className="mt-2 text-xs text-gray-300 bg-gray-800 rounded p-3 overflow-auto">
-{JSON.stringify(
-  {
-    isLoading,
-    hasApiError,
-    apiStatus,
-    apiBody,
-    settings,
-  },
-  null,
-  2
-)}
+{JSON.stringify({ isLoading, settings, normalizedPlan }, null, 2)}
         </pre>
       </details>
     </main>

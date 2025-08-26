@@ -1,7 +1,7 @@
 "use client";
 
 import useSWR from "swr";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 
 const fetcher = (u) => fetch(u).then((r) => r.json());
 
@@ -10,6 +10,10 @@ export default function Dashboard() {
   const { data, error, isLoading, mutate } = useSWR("/api/alerts", fetcher, { refreshInterval: 0 });
   const [filter, setFilter] = useState("all");
   const [isScanning, setIsScanning] = useState(false);
+  const [countingIds, setCountingIds] = useState(() => new Set()); // NEW
+
+
+
 
   // Connected stores
   const { data: storesData } = useSWR("/api/me/stores", fetcher);
@@ -26,12 +30,16 @@ export default function Dashboard() {
   const invRows = invData?.items ?? [];
   const invCount = invData?.count ?? 0;
 
-  // Live KPIs (count, at-risk revenue, confidence)
+  // Live KPIs (count, at-risk revenue, confidence) — poll every 15s and on window focus
   const {
     data: kpis,
     isLoading: kpisLoading,
     mutate: mutateKpis,
-  } = useSWR("/api/kpis", fetcher, { refreshInterval: 0 });
+  } = useSWR("/api/kpis", fetcher, {
+    refreshInterval: 15000,
+    revalidateOnFocus: true,
+    dedupingInterval: 5000,
+  });
 
   // User settings (currency)
   const { data: settingsData, mutate: mutateSettings } = useSWR("/api/settings", fetcher, { refreshInterval: 0 });
@@ -48,6 +56,7 @@ export default function Dashboard() {
   const liveCount = kpis?.count ?? (data?.alerts?.length ?? 0);
   const atRiskRevenue = kpis?.atRiskRevenue ?? 0;
   const confidence = kpis?.confidence ?? 0;
+  const confidencePretty = `${Math.min(100, Math.max(0, Number(confidence || 0))).toFixed(1)}%`;
 
   const alerts = useMemo(() => {
     const a = data?.alerts ?? [];
@@ -64,7 +73,39 @@ export default function Dashboard() {
     const res = await fetch(`/api/alerts/${id}/resolve`, { method: "POST" });
     if (!res.ok) mutate(prev, false);
     else {
+      // also clear counting state for this id if present
+      setCountingIds((prevSet) => {
+        const n = new Set(prevSet);
+        n.delete(id);
+        return n;
+      });
       await Promise.all([mutate(), mutateKpis()]); // revalidate alerts + KPIs
+    }
+  }
+
+  // Start Count with optimistic UI
+  async function startCount(id) {
+    // mark as counting immediately
+    setCountingIds((prevSet) => new Set(prevSet).add(id));
+    try {
+      const res = await fetch(`/api/alerts/${id}/start-count`, { method: "POST" });
+      if (!res.ok) throw new Error("failed");
+      await Promise.all([mutate(), mutateKpis()]);
+      // keep it in "Counting…" until user resolves; comment the next block back in if you prefer to auto-clear:
+      // setCountingIds((prevSet) => {
+      //   const n = new Set(prevSet);
+      //   n.delete(id);
+      //   return n;
+      // });
+    } catch (e) {
+      console.warn("Start Count failed:", e);
+      // rollback on failure
+      setCountingIds((prevSet) => {
+        const n = new Set(prevSet);
+        n.delete(id);
+        return n;
+      });
+      alert("Could not start a count right now.");
     }
   }
 
@@ -73,7 +114,7 @@ export default function Dashboard() {
       setIsScanning(true);
       const res = await fetch("/api/shopify/scan", { method: "POST" });
       if (res.ok) {
-        await Promise.all([mutate(), invMutate(), mutateKpis()]); // refresh alerts + inventory + KPIs
+        await Promise.all([mutate(), invMutate(), mutateKpis()]);
         return;
       }
       let payload = {};
@@ -105,6 +146,8 @@ export default function Dashboard() {
     await Promise.all([mutateSettings(), mutateKpis()]);
   }
 
+
+  
   return (
     <main className="px-6 py-10 max-w-6xl mx-auto">
       <h2 className="text-3xl font-bold mb-2">Inventory Health</h2>
@@ -144,6 +187,15 @@ export default function Dashboard() {
           <button onClick={() => setFilter("med")} className={`text-xs px-2 py-1 rounded ${filter==="med" ? "bg-yellow-700 text-yellow-100" : "bg-yellow-700/60 hover:bg-yellow-700 text-yellow-100"}`}>Med</button>
         </div>
 
+        <a
+  href="/api/alerts/export"
+  className="px-3 py-2 rounded bg-gray-800 hover:bg-gray-700 text-sm"
+  title="Download current alerts as CSV"
+>
+  Export CSV
+</a>
+
+
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
             <span className="text-sm text-gray-400">Currency:</span>
@@ -171,72 +223,152 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* KPIs (live, formatted) */}
-      <div className="grid md:grid-cols-3 gap-4 mb-6">
-        <div className="bg-gray-800 p-4 rounded">
-          <p className="text-sm text-gray-400">Suspected Ghost SKUs</p>
-          <p className="text-3xl font-bold text-red-400">
-            {kpisLoading ? "…" : liveCount}
-          </p>
-        </div>
-        <div className="bg-gray-800 p-4 rounded">
-          <p className="text-sm text-gray-400">At-Risk Revenue</p>
-          <p className="text-3xl font-bold text-yellow-300">
-            {kpisLoading ? "…" : formatCurrency(atRiskRevenue, currency)}
-          </p>
-        </div>
-        <div className="bg-gray-800 p-4 rounded">
-          <p className="text-sm text-gray-400">Data Confidence</p>
-          <p className="text-3xl font-bold text-green-400">
-            {kpisLoading ? "…" : `${confidence}%`}
-          </p>
-        </div>
-      </div>
+      {/* === Main content area: KPI-left / Alerts-right if we have alerts === */}
+      {(alerts?.length ?? 0) > 0 ? (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          {/* Left rail KPIs */}
+          <aside className="lg:col-span-4 space-y-4">
+            <div className="bg-gray-800 p-5 rounded">
+              <p className="text-sm text-gray-400">Suspected Ghost SKUs</p>
+              <p className="text-4xl font-extrabold mt-1 text-red-400">
+                {kpisLoading ? "…" : liveCount}
+              </p>
+            </div>
+            <div className="bg-gray-800 p-5 rounded">
+              <p className="text-sm text-gray-400">At-Risk Revenue</p>
+              <p className="text-4xl font-extrabold mt-1 text-yellow-300">
+                {kpisLoading ? "…" : formatCurrency(atRiskRevenue, currency)}
+              </p>
+            </div>
+            <div className="bg-gray-800 p-5 rounded">
+              <p className="text-sm text-gray-400">Data Confidence</p>
+              <p className="text-4xl font-extrabold mt-1 text-green-400">
+                {kpisLoading ? "…" : confidencePretty}
+              </p>
+            </div>
+          </aside>
 
-      {/* Alerts table */}
-      <div className="overflow-x-auto rounded-lg ring-1 ring-gray-700">
-        <table className="min-w-full text-sm">
-          <thead className="bg-gray-900/60 text-gray-300">
-            <tr>
-              <th className="text-left px-4 py-2">SKU</th>
-              <th className="text-left px-4 py-2">Product</th>
-              <th className="text-left px-4 py-2">System Qty</th>
-              <th className="text-left px-4 py-2">Expected Qty</th>
-              <th className="text-left px-4 py-2">Risk</th>
-              <th className="text-left px-4 py-2">Action</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-700">
-            {isLoading && (
-              <tr><td colSpan={6} className="px-4 py-6 text-center text-gray-400">Loading…</td></tr>
-            )}
-            {error && (
-              <tr><td colSpan={6} className="px-4 py-6 text-center text-red-400">Failed to load alerts</td></tr>
-            )}
-            {!isLoading && !error && alerts.map((a) => (
-              <tr key={a.id} className="odd:bg-gray-900/30">
-                <td className="px-4 py-2 font-mono">{a.sku}</td>
-                <td className="px-4 py-2">{a.product}</td>
-                <td className="px-4 py-2">{a.systemQty}</td>
-                <td className="px-4 py-2">{a.expectedMin}–{a.expectedMax}</td>
-                <td className="px-4 py-2">
-                  <span className={`px-2 py-1 rounded ${a.severity==="high" ? "bg-red-700 text-red-100" : "bg-yellow-700 text-yellow-100"}`}>
-                    {a.severity === "high" ? "High" : "Med"}
-                  </span>
-                </td>
-                <td className="px-4 py-2">
-                  <button onClick={() => resolve(a.id)} className="px-3 py-1 rounded bg-green-600 hover:bg-green-500 text-black">
-                    Resolve
-                  </button>
-                </td>
-              </tr>
-            ))}
-            {!isLoading && !error && alerts.length === 0 && (
-              <tr><td className="px-4 py-6 text-center text-gray-400" colSpan={6}>No active alerts 🎉</td></tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+          {/* Right: Alerts table */}
+          <section className="lg:col-span-8 space-y-4">
+            <div className="overflow-x-auto rounded-lg ring-1 ring-gray-700">
+              <table className="min-w-full text-sm">
+                <thead className="bg-gray-900/60 text-gray-300">
+                  <tr>
+                    <th className="text-left px-4 py-2">SKU</th>
+                    <th className="text-left px-4 py-2">Product</th>
+                    <th className="text-left px-4 py-2">System Qty</th>
+                    <th className="text-left px-4 py-2">Expected Qty</th>
+                    <th className="text-left px-4 py-2">Risk</th>
+                    <th className="text-left px-4 py-2">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-700">
+                  {isLoading && (
+                    <tr><td colSpan={6} className="px-4 py-6 text-center text-gray-400">Loading…</td></tr>
+                  )}
+                  {error && (
+                    <tr><td colSpan={6} className="px-4 py-6 text-center text-red-400">Failed to load alerts</td></tr>
+                  )}
+                  {!isLoading && !error && alerts.map((a) => (
+                    <tr key={a.id} className="odd:bg-gray-900/30">
+                      <td className="px-4 py-2 font-mono">{a.sku}</td>
+                      <td className="px-4 py-2">{a.product}</td>
+                      <td className="px-4 py-2">{a.systemQty}</td>
+                      <td className="px-4 py-2">{a.expectedMin}–{a.expectedMax}</td>
+                      <td className="px-4 py-2">
+                        <span className={`px-2 py-1 rounded ${a.severity==="high" ? "bg-red-700 text-red-100" : "bg-yellow-700 text-yellow-100"}`}>
+                          {a.severity === "high" ? "High" : "Med"}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2">
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => startCount(a.id)}
+                            disabled={countingIds.has(a.id)}
+                            className={`px-3 py-1 rounded font-semibold ${countingIds.has(a.id)
+                              ? "bg-green-300 text-black cursor-not-allowed"
+                              : "bg-green-600 hover:bg-green-500 text-black"}`}
+                            title={countingIds.has(a.id) ? "Counting in progress" : "Kick off a physical count to fix ghost stock"}
+                          >
+                            {countingIds.has(a.id) ? "Counting…" : "Start Count"}
+                          </button>
+                          <button
+                            onClick={() => resolve(a.id)}
+                            className="px-3 py-1 rounded bg-gray-700 hover:bg-gray-600"
+                          >
+                            Resolve
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Simple insight tiles (placeholders for now) */}
+            <div className="grid sm:grid-cols-3 gap-4">
+              <div className="bg-gray-800 p-4 rounded">
+                <p className="text-xs text-gray-400">Root Cause (Top)</p>
+                <p className="mt-1 font-medium">Receiving mismatch</p>
+                <p className="text-xs text-gray-500">(example)</p>
+              </div>
+              <div className="bg-gray-800 p-4 rounded">
+                <p className="text-xs text-gray-400">Predicted Next Error</p>
+                <p className="mt-1 font-medium">Next mismatch in ~3 days</p>
+                <p className="text-xs text-gray-500">(example)</p>
+              </div>
+              <div className="bg-gray-800 p-4 rounded">
+                <p className="text-xs text-gray-400">Suggested Action</p>
+                <p className="mt-1 font-medium">Cycle count A-isle, bin A12–A16</p>
+                <p className="text-xs text-gray-500">(example)</p>
+              </div>
+            </div>
+          </section>
+        </div>
+      ) : (
+        <>
+          {/* Fallback: your existing KPI row + empty alerts table */}
+          <div className="grid md:grid-cols-3 gap-4 mb-6">
+            <div className="bg-gray-800 p-4 rounded">
+              <p className="text-sm text-gray-400">Suspected Ghost SKUs</p>
+              <p className="text-3xl font-bold text-red-400">
+                {kpisLoading ? "…" : liveCount}
+              </p>
+            </div>
+            <div className="bg-gray-800 p-4 rounded">
+              <p className="text-sm text-gray-400">At-Risk Revenue</p>
+              <p className="text-3xl font-bold text-yellow-300">
+                {kpisLoading ? "…" : formatCurrency(atRiskRevenue, currency)}
+              </p>
+            </div>
+            <div className="bg-gray-800 p-4 rounded">
+              <p className="text-sm text-gray-400">Data Confidence</p>
+              <p className="text-3xl font-bold text-green-400">
+                {kpisLoading ? "…" : `${confidence}%`}
+              </p>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto rounded-lg ring-1 ring-gray-700">
+            <table className="min-w-full text-sm">
+              <thead className="bg-gray-900/60 text-gray-300">
+                <tr>
+                  <th className="text-left px-4 py-2">SKU</th>
+                  <th className="text-left px-4 py-2">Product</th>
+                  <th className="text-left px-4 py-2">System Qty</th>
+                  <th className="text-left px-4 py-2">Expected Qty</th>
+                  <th className="text-left px-4 py-2">Risk</th>
+                  <th className="text-left px-4 py-2">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-700">
+                <tr><td className="px-4 py-6 text-center text-gray-400" colSpan={6}>No active alerts 🎉</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
 
       {/* Inventory Snapshot */}
       <div className="mt-10">

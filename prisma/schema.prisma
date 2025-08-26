@@ -33,28 +33,123 @@ model Alert {
   @@index([storeId, status])
 }
 
-model Store {
-  id          String   @id @default(cuid())
-  userEmail   String
-  shop        String   @unique // e.g., my-shop.myshopify.com
-  accessToken String
-  currency    String?          // <— add this
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
 
-  alerts Alert[]
-
-  @@index([userEmail])
-}
 
 model UserSettings {
   id               String   @id @default(cuid())
   userEmail        String   @unique
   currency         String   @default("USD")
-  plan             String   @default("free") // free | starter | pro | enterprise
+  plan             String   @default("starter") // free | starter | pro | enterprise
   stripeCustomerId String?
   slackWebhookUrl  String?
-  notificationEmail String?   // <— NEW
+  notificationEmail String?   // <-- NEW: email alerts
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 }
+model Organization {
+  id           String        @id @default(cuid())
+  name         String
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  stores       Store[]
+  memberships  Membership[]
+  auditLogs    AuditLog[]
+  rules        Rule[]
+  countSessions CountSession[]
+}
+
+model Membership {
+  id        String   @id @default(cuid())
+  orgId     String
+  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  userEmail String
+  role      String   // 'owner' | 'manager' | 'viewer'
+
+  createdAt DateTime @default(now())
+
+  @@unique([orgId, userEmail])
+  @@index([userEmail])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  orgId     String
+  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  actor     String   // email (or shop string)
+  action    String   // e.g. "alert.resolve", "count.start", "rule.create"
+  target    String?  // e.g. alertId / sessionId / ruleId / sku
+  meta      Json?
+  createdAt DateTime @default(now())
+
+  @@index([orgId, createdAt])
+}
+
+model Rule {
+  id         String   @id @default(cuid())
+  orgId      String
+  org        Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  name       String
+  isActive   Boolean  @default(true)
+  jsonLogic  Json
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([orgId, isActive])
+}
+
+model CountSession {
+  id          String   @id @default(cuid())
+  orgId       String
+  org         Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  startedBy   String         // email/shop who started it
+  assignee    String?        // optional
+  dueAt       DateTime?
+  status      String  @default("open") // open | completed | canceled
+
+  createdAt   DateTime @default(now())
+  completedAt DateTime?
+
+  items       CountItem[]
+}
+
+model CountItem {
+  id         String   @id @default(cuid())
+  sessionId  String
+  session    CountSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  sku        String
+  product    String?
+  expected   Int?
+  counted    Int?
+  status     String  @default("pending") // pending | counted | skipped
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+// EXISTING — update your Store to include orgId (nullable for backfill)
+model Store {
+  id          String   @id @default(cuid())
+
+  // NEW
+  orgId       String?
+  org         Organization? @relation(fields: [orgId], references: [id], onDelete: SetNull)
+
+  userEmail   String
+  shop        String   @unique
+  accessToken String
+  currency    String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  alerts      Alert[]
+
+  @@index([userEmail])
+}
+

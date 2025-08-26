@@ -2,58 +2,54 @@ export const runtime = "nodejs";
 
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
-import { getToken } from "next-auth/jwt";
-import { prisma } from "@/lib/prisma";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/authOptions";
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
-  apiVersion: "2023-10-16",
-});
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+
+// Map plan names to env price IDs (must match your Stripe dashboard)
+const PLAN_TO_PRICE = {
+  starter: process.env.STRIPE_PRICE_STARTER,
+  pro: process.env.STRIPE_PRICE_PRO,
+  enterprise: process.env.STRIPE_PRICE_ENTERPRISE,
+};
 
 export async function POST(req) {
   try {
-    const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET });
-
-    if (!token?.email) {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.email) {
       return NextResponse.json({ error: "unauthorized" }, { status: 401 });
     }
 
-    const { priceId } = await req.json();
+    const body = await req.json().catch(() => ({}));
+    const plan = String(body.plan || "").toLowerCase();
+
+    if (!["starter", "pro", "enterprise"].includes(plan)) {
+      return NextResponse.json({ error: "invalid_plan" }, { status: 400 });
+    }
+
+    const priceId = PLAN_TO_PRICE[plan];
     if (!priceId) {
-      return NextResponse.json({ error: "missing_priceId" }, { status: 400 });
+      return NextResponse.json({ error: `missing_price_for_${plan}` }, { status: 500 });
     }
 
-    const settings = await prisma.userSettings.upsert({
-      where: { userEmail: token.email },
-      update: {},
-      create: { userEmail: token.email },
-    });
-
-    let customerId = settings.stripeCustomerId;
-    if (!customerId) {
-      const customer = await stripe.customers.create({ email: token.email });
-      customerId = customer.id;
-      await prisma.userSettings.update({
-        where: { userEmail: token.email },
-        data: { stripeCustomerId: customerId },
-      });
-    }
+    const base =
+      process.env.NEXT_PUBLIC_BASE_URL ||
+      process.env.NEXT_PUBLIC_APP_URL ||
+      "http://localhost:3000";
 
     const checkout = await stripe.checkout.sessions.create({
       mode: "subscription",
-      customer: customerId,
       line_items: [{ price: priceId, quantity: 1 }],
+      success_url: `${base}/settings?upgraded=1`,
+      cancel_url: `${base}/settings?canceled=1`,
+      customer_email: session.user.email, // simple path for MVP
       allow_promotion_codes: true,
-      success_url: `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/dashboard?billing=success`,
-      cancel_url: `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/settings?billing=cancelled`,
     });
 
     return NextResponse.json({ url: checkout.url });
-  } catch (err) {
-    console.error("Checkout error:", err);
-    return NextResponse.json({ error: "checkout_failed", message: String(err?.message || err) }, { status: 500 });
+  } catch (e) {
+    console.error("Checkout error:", e);
+    return NextResponse.json({ error: e?.message || "checkout_failed" }, { status: 500 });
   }
-}
-
-export async function GET() {
-  return NextResponse.json({ error: "method_not_allowed", hint: "Use POST to create a checkout session." }, { status: 405 });
 }
