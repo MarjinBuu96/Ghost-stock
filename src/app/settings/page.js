@@ -91,8 +91,8 @@ export default function SettingsPage() {
   }
 
   // Supply your Stripe price IDs via NEXT_PUBLIC_ envs or temporarily hardcode here
-  const PRICE_STARTER = process.env.NEXT_PUBLIC_PRICE_STARTER || "price_starter_replace_me";
-  const PRICE_PRO = process.env.NEXT_PUBLIC_PRICE_PRO || "price_pro_replace_me";
+  const PRICE_STARTER = process.env.NEXT_PUBLIC_PRICE_STARTER || "price_1Rx5duAcmGB5xexhvJ1ZkWRR";
+  const PRICE_PRO = process.env.NEXT_PUBLIC_PRICE_PRO || "price_1Rx5duAcmGB5xexhvJ1ZkWRR";
 
   return (
     <main className="min-h-screen px-6 py-10 max-w-3xl mx-auto text-white">

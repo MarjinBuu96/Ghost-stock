@@ -38,6 +38,7 @@ model Store {
   userEmail   String
   shop        String   @unique // e.g., my-shop.myshopify.com
   accessToken String
+  currency    String?          // <— add this
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -47,11 +48,13 @@ model Store {
 }
 
 model UserSettings {
-  id        String   @id @default(cuid())
-  userEmail String   @unique
-  currency  String   @default("USD")
-  plan      String   @default("free") // free | starter | pro
+  id               String   @id @default(cuid())
+  userEmail        String   @unique
+  currency         String   @default("USD")
+  plan             String   @default("free") // free | starter | pro | enterprise
   stripeCustomerId String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  slackWebhookUrl  String?
+  notificationEmail String?   // <— NEW
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 }
