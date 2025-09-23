@@ -3,13 +3,13 @@ generator client {
 }
 
 datasource db {
-  // For local dev we’ll use SQLite. Your .env should have: DATABASE_URL="file:./dev.db"
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")   // pooled connection (Neon Pooler)
+  directUrl = env("DIRECT_URL")     // direct connection (writer)
 }
 
 model Alert {
-  id        String @id @default(cuid())
+  id        String   @id @default(cuid())
   userEmail String
 
   // Relation to Store (required)
@@ -21,7 +21,7 @@ model Alert {
   systemQty   Int
   expectedMin Int
   expectedMax Int
-  severity    String // "high" | "med"
+  severity    String           // "high" | "med"
   status      String   @default("open")
   createdAt   DateTime @default(now())
 
@@ -33,29 +33,28 @@ model Alert {
   @@index([storeId, status])
 }
 
-
-
 model UserSettings {
-  id               String   @id @default(cuid())
-  userEmail        String   @unique
-  currency         String   @default("USD")
-  plan             String   @default("starter") // free | starter | pro | enterprise
-  stripeCustomerId String?
-  slackWebhookUrl  String?
-  notificationEmail String?   // <-- NEW: email alerts
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  id                String   @id @default(cuid())
+  userEmail         String   @unique
+  currency          String   @default("USD")
+  plan              String   @default("starter") // free | starter | pro | enterprise
+  stripeCustomerId  String?  // safe to keep optional even if unused now
+  slackWebhookUrl   String?
+  notificationEmail String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 }
-model Organization {
-  id           String        @id @default(cuid())
-  name         String
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
 
-  stores       Store[]
-  memberships  Membership[]
-  auditLogs    AuditLog[]
-  rules        Rule[]
+model Organization {
+  id            String        @id @default(cuid())
+  name          String
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  stores        Store[]
+  memberships   Membership[]
+  auditLogs     AuditLog[]
+  rules         Rule[]
   countSessions CountSession[]
 }
 
@@ -65,7 +64,7 @@ model Membership {
   org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
   userEmail String
-  role      String   // 'owner' | 'manager' | 'viewer'
+  role      String        // 'owner' | 'manager' | 'viewer'
 
   createdAt DateTime @default(now())
 
@@ -75,16 +74,19 @@ model Membership {
 
 model AuditLog {
   id        String   @id @default(cuid())
-  orgId     String
-  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
-  actor     String   // email (or shop string)
-  action    String   // e.g. "alert.resolve", "count.start", "rule.create"
-  target    String?  // e.g. alertId / sessionId / ruleId / sku
+  // Make org optional so we can log before org is created
+  orgId     String?
+  org       Organization? @relation(fields: [orgId], references: [id], onDelete: SetNull)
+
+  actor     String          // email (or shop string)
+  action    String          // e.g. "alert.resolve", "count.start", "rule.create"
+  target    String?         // e.g. alertId / sessionId / ruleId / sku
   meta      Json?
   createdAt DateTime @default(now())
 
   @@index([orgId, createdAt])
+  @@index([createdAt])
 }
 
 model Rule {
@@ -107,8 +109,8 @@ model CountSession {
   orgId       String
   org         Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
-  startedBy   String         // email/shop who started it
-  assignee    String?        // optional
+  startedBy   String        // email/shop who started it
+  assignee    String?
   dueAt       DateTime?
   status      String  @default("open") // open | completed | canceled
 
@@ -133,11 +135,10 @@ model CountItem {
   updatedAt  DateTime @updatedAt
 }
 
-// EXISTING — update your Store to include orgId (nullable for backfill)
 model Store {
   id          String   @id @default(cuid())
 
-  // NEW
+  // org is optional for backfill/new installs
   orgId       String?
   org         Organization? @relation(fields: [orgId], references: [id], onDelete: SetNull)
 
@@ -147,10 +148,9 @@ model Store {
   currency    String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
-  lastScanAt DateTime?
+  lastScanAt  DateTime?
 
   alerts      Alert[]
 
   @@index([userEmail])
 }
-
