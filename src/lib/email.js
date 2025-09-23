@@ -1,65 +1,52 @@
-// src/lib/email.js
-let transporter = null;
+// server-only email helper that works with SMTP (nodemailer) if available.
+// If SMTP env isn’t set, it no-ops cleanly (so dev/prod won’t crash).
+import 'server-only';
 
-/**
- * Create (or reuse) a transporter.
- * - If SMTP_* env vars exist, try to dynamically import nodemailer and use it.
- * - If nodemailer or SMTP isn’t available, return a fake transporter that just logs.
- */
-async function getTransporter() {
-  if (transporter) return transporter;
+const fromDefault =
+  process.env.EMAIL_FROM ||
+  process.env.MAIL_FROM ||
+  'Ghost Stock <no-reply@localhost.test>';
 
+export async function sendAlertEmail({ to, subject, html, text }) {
+  if (!to) throw new Error('sendAlertEmail: missing "to"');
+  if (!subject) throw new Error('sendAlertEmail: missing "subject"');
+
+  // Only attempt SMTP if configured
   const host = process.env.SMTP_HOST;
-  const port = Number(process.env.SMTP_PORT || 0);
-  const user = process.env.SMTP_USER;
-  const pass = process.env.SMTP_PASS;
-
-  // If no SMTP config, return a fake sender
-  if (!host || !port) {
-    transporter = {
-      async sendMail(opts) {
-        console.log("[EMAIL-FAKE]", {
-          to: opts.to,
-          subject: opts.subject,
-          text: opts.text,
-        });
-        return { messageId: "dev-fake" };
-      },
-    };
-    return transporter;
-  }
-
-  // Try dynamic import only when SMTP is configured
-  try {
-    const nodemailerMod = await import("nodemailer");
-    const nodemailer = nodemailerMod.default || nodemailerMod;
-
-    transporter = nodemailer.createTransport({
-      host,
-      port,
-      secure: port === 465, // true for 465; false for 587/1025/etc
-      auth: user && pass ? { user, pass } : undefined,
+  if (!host) {
+    console.warn('[email] SMTP not configured, skipping send', {
+      to,
+      subject,
     });
-
-    return transporter;
-  } catch (e) {
-    console.warn("nodemailer not available, falling back to fake email:", e?.message || e);
-    transporter = {
-      async sendMail(opts) {
-        console.log("[EMAIL-FAKE]", {
-          to: opts.to,
-          subject: opts.subject,
-          text: opts.text,
-        });
-        return { messageId: "dev-fake" };
-      },
-    };
-    return transporter;
+    return { ok: false, skipped: 'no_smtp' };
   }
+
+  // nodemailer must be in dependencies: `npm i nodemailer`
+  const nodemailerMod = await import('nodemailer');
+  const nodemailer = nodemailerMod.default || nodemailerMod;
+
+  const transporter = nodemailer.createTransport({
+    host,
+    port: Number(process.env.SMTP_PORT || 587),
+    secure: Boolean(process.env.SMTP_SECURE === 'true'), // false = STARTTLS
+    auth: (process.env.SMTP_USER || process.env.SMTP_PASS)
+      ? {
+          user: process.env.SMTP_USER,
+          pass: process.env.SMTP_PASS,
+        }
+      : undefined,
+  });
+
+  const info = await transporter.sendMail({
+    from: fromDefault,
+    to,
+    subject,
+    text: text || undefined,
+    html: html || undefined,
+  });
+
+  return { ok: true, id: info?.messageId || null };
 }
 
-export async function sendMail({ to, subject, text, html }) {
-  const from = process.env.EMAIL_FROM || "Ghost Stock <no-reply@localhost.test>";
-  const tx = await getTransporter();
-  return tx.sendMail({ from, to, subject, text, html });
-}
+// Optional alias for any older imports
+export const sendMail = sendAlertEmail;
