@@ -1,10 +1,13 @@
 // src/lib/scanRunner.js
-import { prisma } from "./prisma";
-import { getInventoryByVariant, getSalesByVariant } from "./shopifyRest";
-import { computeAlerts } from "./alertsEngine";
-import { publish } from "./kpiBus";
-import { computeKpisForUser } from "./kpis";
-import { hasFeature, FEATURES, normalizePlan } from "./entitlements";
+import 'server-only';
+
+import { prisma } from './prisma';
+import { getInventoryByVariant, getSalesByVariant } from './shopifyRest';
+import { computeAlerts } from './alertsEngine';
+import { publish } from './kpiBus';
+import { computeKpisForUser } from './kpis';
+import { hasFeature, FEATURES, normalizePlan } from './entitlements';
+import { sendAlertEmail } from './email';
 
 // daily dedupe key; matches @@unique([storeId, uniqueHash]) in Prisma
 function makeUniqueHash(a) {
@@ -14,7 +17,7 @@ function makeUniqueHash(a) {
 
 export async function runScanForStore(store) {
   if (!store?.shop || !store?.accessToken) {
-    return { ok: false, error: "store_incomplete", alerts: 0 };
+    return { ok: false, error: 'store_incomplete', alerts: 0 };
   }
 
   // 1) Inventory (required)
@@ -30,8 +33,8 @@ export async function runScanForStore(store) {
   try {
     salesMap = await getSalesByVariant(store.shop, store.accessToken);
   } catch (e) {
-    const msg = (e?.message || "").toLowerCase();
-    const missingScope = msg.includes("401") || msg.includes("403");
+    const msg = (e?.message || '').toLowerCase();
+    const missingScope = msg.includes('401') || msg.includes('403');
     if (!missingScope) {
       return { ok: false, error: `orders_error:${e?.message || e}`, alerts: 0 };
     }
@@ -54,7 +57,7 @@ export async function runScanForStore(store) {
             expectedMin: a.expectedMin,
             expectedMax: a.expectedMax,
             severity: a.severity,
-            status: "open",
+            status: 'open',
           },
           create: {
             userEmail: store.userEmail, // embedded mode uses shop as userEmail; OK
@@ -65,7 +68,7 @@ export async function runScanForStore(store) {
             expectedMin: a.expectedMin,
             expectedMax: a.expectedMax,
             severity: a.severity,
-            status: "open",
+            status: 'open',
             uniqueHash: makeUniqueHash(a),
           },
         })
@@ -73,12 +76,22 @@ export async function runScanForStore(store) {
     );
   }
 
+  // 4b) Update lastScanAt for this store
+  try {
+    await prisma.store.update({
+      where: { id: store.id },
+      data: { lastScanAt: new Date() },
+    });
+  } catch (e) {
+    console.warn('Could not update lastScanAt:', e?.message || e);
+  }
+
   // 5) KPIs + SSE
   try {
     const kpis = await computeKpisForUser(store.userEmail);
     publish(store.userEmail, kpis);
   } catch (e) {
-    console.warn("KPI publish failed:", e);
+    console.warn('KPI publish failed:', e);
   }
 
   // 6) Slack (Pro+)
@@ -87,7 +100,7 @@ export async function runScanForStore(store) {
       where: { userEmail: store.userEmail },
       select: { plan: true, slackWebhookUrl: true },
     });
-    const plan = normalizePlan(settings?.plan || "starter");
+    const plan = normalizePlan(settings?.plan || 'starter');
     const webhook = settings?.slackWebhookUrl?.trim();
 
     if (alerts.length > 0 && webhook && hasFeature(plan, FEATURES.SLACK_WEBHOOK)) {
@@ -97,28 +110,60 @@ export async function runScanForStore(store) {
           (a) =>
             `• ${a.sku} (${a.severity}) expected ${a.expectedMin}-${a.expectedMax}, system ${a.systemQty}`
         )
-        .join("\n");
-      const more = alerts.length > 5 ? `\n…+${alerts.length - 5} more` : "";
+        .join('\n');
+      const more = alerts.length > 5 ? `\n…+${alerts.length - 5} more` : '';
       const base =
         process.env.NEXT_PUBLIC_BASE_URL ||
         process.env.NEXT_PUBLIC_APP_URL ||
-        "http://localhost:3000";
+        'http://localhost:3000';
       const text =
         `⚠️ *Ghost Stock Alerts* for *${store.shop}* (${alerts.length} total)\n` +
         `${top}${more}\n` +
         `Open dashboard: ${base}/dashboard`;
 
       const resp = await fetch(webhook, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text }),
       });
       if (!resp.ok) {
-        console.warn("Slack webhook HTTP error:", resp.status, await resp.text().catch(() => ""));
+        console.warn('Slack webhook HTTP error:', resp.status, await resp.text().catch(() => ''));
       }
     }
   } catch (e) {
-    console.warn("Slack webhook failed:", e);
+    console.warn('Slack webhook failed:', e);
+  }
+
+  // 7) Email (Pro+/Enterprise)
+  try {
+    const settings = await prisma.userSettings.findUnique({
+      where: { userEmail: store.userEmail },
+      select: { plan: true, notificationEmail: true },
+    });
+    const plan = normalizePlan(settings?.plan || 'starter');
+    const to = settings?.notificationEmail;
+
+    if (alerts.length > 0 && to && hasFeature(plan, FEATURES.EMAIL_ALERTS)) {
+      const subject = `Ghost Stock Alerts — ${store.shop} (${alerts.length})`;
+      const top = alerts
+        .slice(0, 10)
+        .map(
+          (a) =>
+            `• ${a.sku} (${a.severity}) expected ${a.expectedMin}-${a.expectedMax}, system ${a.systemQty}`
+        )
+        .join('<br/>');
+      const more = alerts.length > 10 ? `<br/>…+${alerts.length - 10} more` : '';
+      const base =
+        process.env.NEXT_PUBLIC_BASE_URL ||
+        process.env.NEXT_PUBLIC_APP_URL ||
+        'http://localhost:3000';
+      const html =
+        `<p>New ghost-stock alerts for <b>${store.shop}</b>:</p><p>${top}${more}</p>` +
+        `<p><a href="${base}/dashboard">Open dashboard</a></p>`;
+      await sendAlertEmail({ to, subject, html });
+    }
+  } catch (e) {
+    console.warn('Email alert failed:', e);
   }
 
   return { ok: true, alerts: alerts.length };
@@ -140,51 +185,23 @@ export async function runAutoScanForEligibleStores() {
       where: { userEmail: store.userEmail },
       select: { plan: true },
     });
-    const plan = normalizePlan(settings?.plan || "starter");
+    const plan = normalizePlan(settings?.plan || 'starter');
 
     if (!hasFeature(plan, FEATURES.AUTO_SCAN)) {
       skipped++;
-      details.push({ shop: store.shop, action: "skipped", reason: "no_auto_scan_in_plan" });
+      details.push({ shop: store.shop, action: 'skipped', reason: 'no_auto_scan_in_plan' });
       continue;
     }
 
     const res = await runScanForStore(store);
     if (res.ok) {
       scanned++;
-      details.push({ shop: store.shop, action: "scanned", alerts: res.alerts });
+      details.push({ shop: store.shop, action: 'scanned', alerts: res.alerts });
     } else {
       failures++;
-      details.push({ shop: store.shop, action: "failed", error: res.error });
+      details.push({ shop: store.shop, action: 'failed', error: res.error });
     }
   }
 
   return { total: stores.length, scanned, skipped, failures, details };
-}
-
-import { sendAlertEmail } from "./email";
-import { hasFeature, FEATURES, normalizePlan } from "./entitlements";
-
-// ... inside runScanForStore(), after Slack webhook block:
-try {
-  const settings = await prisma.userSettings.findUnique({
-    where: { userEmail: store.userEmail },
-    select: { plan: true, notificationEmail: true },
-  });
-  const plan = normalizePlan(settings?.plan || "starter");
-  const to = settings?.notificationEmail;
-
-  if (alerts.length > 0 && to && hasFeature(plan, FEATURES.EMAIL_ALERTS)) {
-    const subject = `Ghost Stock Alerts — ${store.shop} (${alerts.length})`;
-    const top = alerts.slice(0, 10).map(a =>
-      `• ${a.sku} (${a.severity}) expected ${a.expectedMin}-${a.expectedMax}, system ${a.systemQty}`
-    ).join("<br/>");
-    const more = alerts.length > 10 ? `<br/>…+${alerts.length - 10} more` : "";
-    const base = process.env.NEXT_PUBLIC_BASE_URL || process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-    const html =
-      `<p>New ghost-stock alerts for <b>${store.shop}</b>:</p><p>${top}${more}</p>` +
-      `<p><a href="${base}/dashboard">Open dashboard</a></p>`;
-    await sendAlertEmail({ to, subject, html });
-  }
-} catch (e) {
-  console.warn("Email alert failed:", e);
 }
