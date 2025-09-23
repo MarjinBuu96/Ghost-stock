@@ -23,7 +23,7 @@ export default function SettingsPage() {
   const { data, error, isLoading, mutate } = useSWR("/api/settings", fetcher);
   const settings = data?.settings || {};
 
-  // Plan handling
+  // Plan handling (plan comes from your userSettings, updated by your Shopify billing flow)
   const planRaw = String(settings?.plan || "starter").toLowerCase();
   const normalizedPlan = ["free", "starter", "pro", "enterprise"].includes(planRaw)
     ? planRaw
@@ -49,8 +49,8 @@ export default function SettingsPage() {
 
   function notify(msg) {
     setToast(msg);
-    clearTimeout((notify)._t);
-    (notify)._t = setTimeout(() => setToast(""), 3000);
+    clearTimeout(notify._t);
+    notify._t = setTimeout(() => setToast(""), 3000);
   }
 
   async function changeCurrency(newCcy) {
@@ -107,35 +107,40 @@ export default function SettingsPage() {
     }
   }
 
-  async function goCheckoutPlan(plan) {
+  // ---- Shopify Billing actions ----
+  async function goShopifyUpgrade(plan) {
     try {
       setBillingBusy(true);
-      const res = await fetch("/api/billing/checkout", {
+      // Implemented by your /api/shopify/billing/upgrade route
+      const res = await fetch("/api/shopify/billing/upgrade", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ plan }), // "starter" | "pro" | "enterprise"
       });
       const json = await res.json().catch(() => ({}));
-      if (!res.ok || !json?.url) throw new Error(json?.error || "Checkout failed");
-      window.location.href = json.url;
+      if (!res.ok || !json?.confirmationUrl) throw new Error(json?.error || "Upgrade failed");
+      // Redirect merchant to Shopify approval screen
+      window.location.href = json.confirmationUrl;
     } catch {
-      notify("Checkout failed");
+      notify("Could not start Shopify upgrade");
       setBillingBusy(false);
     }
   }
 
-  async function goPortal() {
+  async function goShopifyManage() {
     try {
       setBillingBusy(true);
-      const res = await fetch("/api/billing/portal", { method: "POST" });
+      // Optional: implement /api/shopify/billing/manage to return a management URL or your own manage page
+      const res = await fetch("/api/shopify/billing/manage", { method: "POST" });
       const json = await res.json().catch(() => ({}));
-      if (!res.ok || !json?.url) throw new Error(json?.error || "Portal failed");
+      if (!res.ok || !json?.url) throw new Error(json?.error || "Manage failed");
       window.location.href = json.url;
     } catch {
-      notify("Could not open billing portal");
+      notify("Could not open Shopify billing");
       setBillingBusy(false);
     }
   }
+  // ---------------------------------
 
   const showUpgradeStarter = normalizedPlan !== "starter";
   const showUpgradePro = normalizedPlan !== "pro";
@@ -176,7 +181,7 @@ export default function SettingsPage() {
         </form>
       </section>
 
-      {/* Subscription */}
+      {/* Billing via Shopify */}
       <section id="billing" className="mb-8 rounded border border-gray-700 bg-gray-900 p-5">
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -184,20 +189,23 @@ export default function SettingsPage() {
             <p className="text-gray-400 text-sm mt-1">
               Current plan: <span className="font-medium uppercase">{isLoading ? "…" : normalizedPlan}</span>
             </p>
+            <p className="text-xs text-gray-500 mt-1">
+              Plan changes are handled inside Shopify (you’ll see a standard approval screen).
+            </p>
           </div>
           <div className="flex flex-wrap gap-2">
             {showUpgradeStarter && (
               <button
-                onClick={() => goCheckoutPlan("starter")}
+                onClick={() => goShopifyUpgrade("starter")}
                 disabled={billingBusy}
                 className="rounded bg-emerald-500 hover:bg-emerald-600 text-black px-3 py-2 text-sm font-semibold disabled:opacity-60"
               >
-                Upgrade to Starter
+                Switch to Starter
               </button>
             )}
             {showUpgradePro && (
               <button
-                onClick={() => goCheckoutPlan("pro")}
+                onClick={() => goShopifyUpgrade("pro")}
                 disabled={billingBusy}
                 className="rounded bg-indigo-500 hover:bg-indigo-600 text-black px-3 py-2 text-sm font-semibold disabled:opacity-60"
               >
@@ -206,19 +214,21 @@ export default function SettingsPage() {
             )}
             {showUpgradeEnterprise && (
               <button
-                onClick={() => goCheckoutPlan("enterprise")}
+                onClick={() => goShopifyUpgrade("enterprise")}
                 disabled={billingBusy}
                 className="rounded bg-purple-500 hover:bg-purple-600 text-black px-3 py-2 text-sm font-semibold disabled:opacity-60"
               >
                 Upgrade to Enterprise
               </button>
             )}
+
+            {/* Optional: only keep if you've implemented /api/shopify/billing/manage */}
             <button
-              onClick={goPortal}
+              onClick={goShopifyManage}
               disabled={billingBusy}
               className="rounded bg-gray-700 hover:bg-gray-600 px-3 py-2 text-sm font-semibold disabled:opacity-60"
             >
-              Manage Billing
+              Manage Plan
             </button>
           </div>
         </div>
@@ -274,8 +284,8 @@ export default function SettingsPage() {
           {!canUseIntegrations && (
             <div className="text-xs text-gray-400">
               Upgrade to{" "}
-              <button className="underline" onClick={() => goCheckoutPlan("pro")}>Pro</button> or{" "}
-              <button className="underline" onClick={() => goCheckoutPlan("enterprise")}>Enterprise</button>{" "}
+              <button className="underline" onClick={() => goShopifyUpgrade("pro")}>Pro</button> or{" "}
+              <button className="underline" onClick={() => goShopifyUpgrade("enterprise")}>Enterprise</button>{" "}
               to enable Slack alerts.
             </div>
           )}
@@ -320,8 +330,8 @@ export default function SettingsPage() {
           {!canUseIntegrations && (
             <div className="text-xs text-gray-400">
               Upgrade to{" "}
-              <button className="underline" onClick={() => goCheckoutPlan("pro")}>Pro</button> or{" "}
-              <button className="underline" onClick={() => goCheckoutPlan("enterprise")}>Enterprise</button>{" "}
+              <button className="underline" onClick={() => goShopifyUpgrade("pro")}>Pro</button> or{" "}
+              <button className="underline" onClick={() => goShopifyUpgrade("enterprise")}>Enterprise</button>{" "}
               to enable email alerts.
             </div>
           )}

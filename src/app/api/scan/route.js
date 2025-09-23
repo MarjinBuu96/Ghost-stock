@@ -98,6 +98,15 @@ export async function POST() {
       );
     }
 
+    await prisma.store.update({
+  where: { id: store.id },
+  data: { lastScanAt: new Date() },
+});
+
+
+
+
+
     return NextResponse.json({ created_or_updated: alerts.length });
   } catch (err) {
     console.error("SCAN ERROR", err);

@@ -83,7 +83,8 @@ export async function GET(req) {
     res.cookies.set("shopify_oauth_state", "", { path: "/", maxAge: 0 });
     res.cookies.set("shopify_shop", shop, {
       httpOnly: true,
-      sameSite: "lax",
+      sameSite: "none",
+      secure: "true",
       path: "/",
       maxAge: 60 * 60 * 24 * 365,
     });
