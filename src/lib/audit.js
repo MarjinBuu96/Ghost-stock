@@ -2,22 +2,28 @@
 import { prisma } from "@/lib/prisma";
 
 /**
- * Safe audit logger. If orgId is missing, it quietly skips logging.
- * This avoids Prisma errors until Organizations are fully wired.
+ * Safe audit logger. Skips if orgId is missing (useful during backfill/dev).
  */
 export async function logAuditSafe({ orgId, actor, action, target = null, meta = null }) {
   try {
-    if (!orgId) return; // skip when we don’t have an org to attach to
+    if (!orgId) {
+      // Skip quietly if no orgId is known yet
+      return { ok: false, skipped: "no_orgId" };
+    }
     await prisma.auditLog.create({
-      data: {
-        orgId,          // required relation scalar
-        actor,          // e.g., store.userEmail (or shop)
-        action,         // e.g., "scan.run"
-        target,         // e.g., store.shop or alert id
-        meta,           // JSON
-      },
+      data: { orgId, actor, action, target, meta },
     });
+    return { ok: true };
   } catch (e) {
     console.warn("Audit log failed:", e?.message || e);
+    return { ok: false, error: String(e?.message || e) };
   }
+}
+
+/**
+ * Back-compat alias with old positional signature.
+ * Any existing `logAudit(orgId, actor, action, target, meta)` calls will work.
+ */
+export async function logAudit(orgId, actor, action, target = null, meta = null) {
+  return logAuditSafe({ orgId, actor, action, target, meta });
 }
