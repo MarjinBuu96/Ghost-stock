@@ -2,6 +2,7 @@
 
 import useSWR from "swr";
 import { useEffect, useState } from "react";
+import { fetcher } from "@/lib/fetcher";
 
 const fetcher = async (u) => {
   const r = await fetch(u, { cache: "no-store" });
