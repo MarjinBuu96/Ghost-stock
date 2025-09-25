@@ -1,29 +1,49 @@
+// src/app/api/shopify/install/route.js
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import crypto from "crypto";
 
+function buildBase() {
+  const base =
+    process.env.SHOPIFY_APP_URL ||
+    process.env.NEXT_PUBLIC_APP_URL ||
+    "http://localhost:3000";
+  return base.replace(/\/+$/, "");
+}
+
 export async function GET(req) {
   const url = new URL(req.url);
-  const shop = url.searchParams.get("shop");
+  const shop = (url.searchParams.get("shop") || "").toLowerCase().trim();
 
   if (!shop || !shop.endsWith(".myshopify.com")) {
-    return NextResponse.json({ error: "invalid_shop" }, { status: 400 });
+    return NextResponse.json({ error: "missing_or_bad_shop" }, { status: 400 });
   }
 
+  // generate & store state
   const state = crypto.randomBytes(16).toString("hex");
-  const redirectUri = `${process.env.SHOPIFY_APP_URL || process.env.NEXT_PUBLIC_APP_URL}/api/shopify/callback`;
-  const scopes = (process.env.SHOPIFY_SCOPES || "").split(",").map(s => s.trim()).join(",");
 
-  const authUrl =
+  const base = buildBase();
+  const redirectUri = `${base}/api/shopify/callback`;
+  const scopes = process.env.SHOPIFY_SCOPES || "";
+
+  const authorizeUrl =
     `https://${shop}/admin/oauth/authorize?client_id=${process.env.SHOPIFY_API_KEY}` +
     `&scope=${encodeURIComponent(scopes)}` +
     `&redirect_uri=${encodeURIComponent(redirectUri)}` +
     `&state=${state}`;
 
-  const res = NextResponse.redirect(authUrl);
-  // persist state and shop for callback validation
-  res.cookies.set("shopify_oauth_state", state, { httpOnly: true, sameSite: "lax", path: "/" });
-  res.cookies.set("shopify_shop", shop, { httpOnly: true, sameSite: "lax", path: "/", maxAge: 60 * 60 * 24 * 365 });
+  const res = NextResponse.redirect(authorizeUrl, 302);
+
+  // IMPORTANT: cross-site cookie for embedded OAuth
+  res.cookies.set(`shopify_state_${shop}`, state, {
+    httpOnly: true,
+    secure: true,
+    sameSite: "none",
+    path: "/",
+    maxAge: 10 * 60, // 10 minutes
+  });
+
   return res;
 }

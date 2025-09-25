@@ -1,0 +1,28 @@
+name = "Ghost Stock Killer"
+client_id = "5860dca7a3c5d0818a384115d221179a"
+application_url = "https://ghost-stock.co.uk"
+embedded = true
+
+[auth]
+redirect_urls = [
+  "https://ghost-stock.co.uk/api/shopify/callback"
+]
+
+[webhooks]
+api_version = "2023-07"
+
+[[webhooks.subscriptions]]
+compliance_topics = [
+  "customers/data_request",
+  "customers/redact",
+  "shop/redact"
+]
+uri = "https://ghost-stock.co.uk/api/shopify/webhooks"
+
+[build]
+
+
+# Optional: normal (non-compliance) topics you also handle
+# [[webhooks.subscriptions]]
+# topics = ["orders/create", "inventory_levels/update"]
+# uri = "https://ghost-stock.co.uk/api/shopify/webhooks"
