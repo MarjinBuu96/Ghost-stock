@@ -1,61 +1,35 @@
-// src/app/api/shopify/callback/route.js
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-import { NextResponse } from "next/server";
 import crypto from "crypto";
+import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
-function hmacValid(searchParams) {
-  const params = new URLSearchParams(searchParams);
-  const hmac = params.get("hmac") || "";
-  params.delete("hmac");
-  // Shopify requires sorted querystring
-  const msg = new URLSearchParams([...params.entries()].sort()).toString();
-  const digest = crypto
-    .createHmac("sha256", process.env.SHOPIFY_API_SECRET)
-    .update(msg)
-    .digest("hex");
-  // timing-safe compare
-  try {
-    return crypto.timingSafeEqual(Buffer.from(hmac, "utf8"), Buffer.from(digest, "utf8"));
-  } catch {
-    return false;
-  }
-}
-
-function baseUrl() {
-  return (process.env.SHOPIFY_APP_URL || process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000").replace(/\/+$/,"");
+function safeEquals(a, b) {
+  try { return crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b)); } catch { return false; }
 }
 
 export async function GET(req) {
   const url = new URL(req.url);
   const shop = (url.searchParams.get("shop") || "").toLowerCase();
-  const code = url.searchParams.get("code");
-  const state = url.searchParams.get("state");
+  const state = url.searchParams.get("state") || "";
+  const code = url.searchParams.get("code") || "";
+  const host = url.searchParams.get("host") || "";
 
-  if (!shop || !code || !state) {
+  if (!shop || !code) {
     return NextResponse.json({ error: "missing_params" }, { status: 400 });
   }
 
-  // 1) Validate HMAC on the query (recommended)
-  if (!hmacValid(url.searchParams)) {
-    return NextResponse.json({ error: "bad_hmac" }, { status: 401 });
-  }
-
-  // 2) Validate state from cookie
-  const cookieName = `shopify_state_${shop}`;
-  const expected = req.cookies.get(cookieName)?.value;
-  if (!expected || expected !== state) {
+  // 1) check state vs cookie
+  const cookie = req.headers.get("cookie") || "";
+  const m = cookie.match(/(?:^|;\s*)shopify_oauth_state=([^;]+)/);
+  const stateCookie = m ? decodeURIComponent(m[1]) : "";
+  if (!stateCookie || !safeEquals(stateCookie, state)) {
     return NextResponse.json({ error: "invalid_state" }, { status: 400 });
   }
 
-  // clear the state cookie
-  const clearState = NextResponse.next();
-  clearState.cookies.set(cookieName, "", { path: "/", maxAge: 0 });
-
-  // 3) Exchange code for access token
-  const tokenResp = await fetch(`https://${shop}/admin/oauth/access_token`, {
+  // 2) exchange code for token
+  const tokenRes = await fetch(`https://${shop}/admin/oauth/access_token`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -64,27 +38,37 @@ export async function GET(req) {
       code,
     }),
   });
-  const tok = await tokenResp.json().catch(() => ({}));
-  const accessToken = tok?.access_token;
-  if (!tokenResp.ok || !accessToken) {
-    return NextResponse.json({ error: "token_exchange_failed", details: tok }, { status: 401 });
+  if (!tokenRes.ok) {
+    return NextResponse.json({ error: "token_exchange_failed" }, { status: 400 });
   }
+  const { access_token } = await tokenRes.json();
 
-  // 4) Save store
-  const store = await prisma.store.upsert({
+  // 3) store / upsert
+  await prisma.store.upsert({
     where: { shop },
-    update: { accessToken },
-    create: { shop, accessToken, userEmail: shop }, // you use shop as userEmail in embedded mode
-    select: { id: true },
+    update: { accessToken: access_token, updatedAt: new Date() },
+    create: {
+      shop,
+      accessToken: access_token,
+      userEmail: shop, // embedded: we key by shop
+    },
   });
 
-  // 5) Redirect to your app UI (embedded)
-  const to = `${baseUrl()}/dashboard`;
-  const res = NextResponse.redirect(to, 302);
-  // Set your own session cookies if your app expects them
-  res.cookies.set("active_store_id", store.id, { path: "/", sameSite: "lax" });
-  res.cookies.set("shop", shop, { path: "/", sameSite: "lax" });
-  // also clear state cookie in the final response
-  res.cookies.set(cookieName, "", { path: "/", maxAge: 0 });
+  // ensure a settings row exists
+  await prisma.userSettings.upsert({
+    where: { userEmail: shop },
+    update: {},
+    create: { userEmail: shop, plan: "starter" },
+  });
+
+  // 4) go to your embedded UI with shop+host
+  const appBase =
+    (process.env.NEXT_PUBLIC_APP_URL || process.env.SHOPIFY_APP_URL || "").replace(/\/$/, "") ||
+    `${url.protocol}//${url.host}`;
+  const ui = `${appBase}/dashboard?shop=${encodeURIComponent(shop)}&host=${encodeURIComponent(host)}`;
+
+  const res = NextResponse.redirect(ui);
+  // keep a lightweight session cookie so your middleware knows you’re installed
+  res.cookies.set("shopify_shop", shop, { secure: true, sameSite: "none", path: "/" });
   return res;
 }
