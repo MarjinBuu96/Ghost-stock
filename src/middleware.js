@@ -1,20 +1,28 @@
 import { NextResponse } from "next/server";
 
 export function middleware(req) {
-  const res = NextResponse.next();
-  const csp = [
-    "default-src 'self'",
-    "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
-    "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data: blob:",
-    "connect-src 'self' https://*.myshopify.com https://admin.shopify.com",
-    "frame-ancestors https://admin.shopify.com https://*.myshopify.com",
-  ].join("; ");
+  const url = new URL(req.url);
+  const pathname = url.pathname;
 
-  res.headers.set("Content-Security-Policy", csp);
-  res.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
-  res.headers.set("X-Frame-Options", "ALLOWALL"); // CSP frame-ancestors is the real control
-  return res;
+  // never touch API or static
+  if (pathname.startsWith("/api") || pathname.startsWith("/_next") || pathname.startsWith("/favicon")) {
+    return NextResponse.next();
+  }
+
+  const shop = url.searchParams.get("shop");
+  const shopCookie = req.cookies.get("shopify_shop")?.value;
+
+  // If Shopify opens our app (with ?shop=...), and we don't have a session cookie yet,
+  // kick off OAuth immediately.
+  if (shop && !shopCookie) {
+    const installUrl = new URL(`/api/shopify/install`, req.url);
+    installUrl.searchParams.set("shop", shop);
+    return NextResponse.redirect(installUrl);
+  }
+
+  return NextResponse.next();
 }
 
-export const config = { matcher: ["/((?!_next|favicon.ico).*)"] };
+export const config = {
+  matcher: ["/((?!api|_next|favicon.ico).*)"],
+};

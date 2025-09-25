@@ -1,62 +1,29 @@
-// src/app/api/shopify/install/route.js
 export const runtime = "nodejs";
 
 import { NextResponse } from "next/server";
 import crypto from "crypto";
 
-function randomState() {
-  return crypto.randomBytes(16).toString("hex");
-}
-
 export async function GET(req) {
   const url = new URL(req.url);
   const shop = url.searchParams.get("shop");
 
-  // Basic validation
-  if (!shop || !/^[a-z0-9-]+\.myshopify\.com$/i.test(shop)) {
+  if (!shop || !shop.endsWith(".myshopify.com")) {
     return NextResponse.json({ error: "invalid_shop" }, { status: 400 });
   }
 
-  // Env validation
-  const clientId = process.env.SHOPIFY_API_KEY;
-  const clientSecret = process.env.SHOPIFY_API_SECRET; // not used here, but ensure present
-  if (!clientId || !clientSecret) {
-    return NextResponse.json({ error: "missing_shopify_env" }, { status: 500 });
-  }
+  const state = crypto.randomBytes(16).toString("hex");
+  const redirectUri = `${process.env.SHOPIFY_APP_URL || process.env.NEXT_PUBLIC_APP_URL}/api/shopify/callback`;
+  const scopes = (process.env.SHOPIFY_SCOPES || "").split(",").map(s => s.trim()).join(",");
 
-  // Scopes for your app
-  const scopes =
-    process.env.SHOPIFY_SCOPES ||
-    "read_products,read_inventory,read_orders";
-
-  // Callback base URL
-  const base =
-    process.env.SHOPIFY_APP_URL ||
-    process.env.NEXT_PUBLIC_BASE_URL ||
-    new URL("/", req.url).toString().replace(/\/$/, "");
-
-  const callback = `${base}/api/shopify/callback`;
-
-  // CSRF state
-  const state = randomState();
-
-  // Build Shopify authorize URL
-  const authorizeUrl =
-    `https://${shop}/admin/oauth/authorize` +
-    `?client_id=${encodeURIComponent(clientId)}` +
+  const authUrl =
+    `https://${shop}/admin/oauth/authorize?client_id=${process.env.SHOPIFY_API_KEY}` +
     `&scope=${encodeURIComponent(scopes)}` +
-    `&redirect_uri=${encodeURIComponent(callback)}` +
-    `&state=${encodeURIComponent(state)}`;
+    `&redirect_uri=${encodeURIComponent(redirectUri)}` +
+    `&state=${state}`;
 
-  // Sanity log (no secrets)
-  console.log(
-    "Shopify OAuth redirect:",
-    JSON.stringify({ shop, clientIdLen: String(clientId).length, callback, scopes })
-  );
-
-  // Redirect and set validation cookies
-  const res = NextResponse.redirect(authorizeUrl, 307);
+  const res = NextResponse.redirect(authUrl);
+  // persist state and shop for callback validation
   res.cookies.set("shopify_oauth_state", state, { httpOnly: true, sameSite: "lax", path: "/" });
-  res.cookies.set("shopify_shop", shop, { httpOnly: true, sameSite: "lax", path: "/" });
+  res.cookies.set("shopify_shop", shop, { httpOnly: true, sameSite: "lax", path: "/", maxAge: 60 * 60 * 24 * 365 });
   return res;
 }
