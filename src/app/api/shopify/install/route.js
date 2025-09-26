@@ -8,7 +8,7 @@ import { prisma } from "@/lib/prisma";
 const STATE_COOKIE = "shopify_oauth_state";
 const SHOP_COOKIE  = "shopify_shop";
 
-export async function GET(req) {
+export async function GET(req: Request) {
   const url  = new URL(req.url);
   const shop = (url.searchParams.get("shop") || "").toLowerCase();
 
@@ -29,12 +29,19 @@ export async function GET(req) {
     );
   }
 
-  const clientId     = process.env.SHOPIFY_API_KEY;
+  // ✅ Updated to match Vercel env vars
+  const clientId     = process.env.SHOPIFY_APP_KEY;
   const scopes       = process.env.SHOPIFY_SCOPES || "";
-  const redirectUri  = process.env.SHOPIFY_REDIRECT_URI;
+  const redirectUri  = process.env.SHOPIFY_APP_URL;
 
   if (!clientId || !redirectUri) {
-    return NextResponse.json({ error: "missing_env_vars" }, { status: 500 });
+    return NextResponse.json({
+      error: "missing_env_vars",
+      details: {
+        SHOPIFY_APP_KEY: !!clientId,
+        SHOPIFY_APP_URL: !!redirectUri,
+      },
+    }, { status: 500 });
   }
 
   const state = crypto.randomUUID();
