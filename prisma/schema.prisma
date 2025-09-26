@@ -154,3 +154,11 @@ model Store {
 
   @@index([userEmail])
 }
+
+model OAuthState {
+  state     String   @id           // random UUID, unique
+  shop      String
+  createdAt DateTime @default(now())
+
+  @@index([shop, createdAt])
+}
