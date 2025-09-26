@@ -4,12 +4,6 @@ import useSWR from "swr";
 import { useEffect, useState } from "react";
 import { fetcher } from "@/lib/fetcher";
 
-const fetcher = async (u) => {
-  const r = await fetch(u, { cache: "no-store" });
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(j?.error || `HTTP ${r.status}`);
-  return j;
-};
 
 export default function SettingsPage() {
   // Shopify connect form
