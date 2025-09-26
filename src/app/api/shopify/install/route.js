@@ -1,10 +1,13 @@
+// src/app/api/shopify/install/route.js
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 import crypto from "crypto";
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
 
 const STATE_COOKIE = "shopify_oauth_state";
+const SHOP_COOKIE  = "shopify_shop";
 
 export async function GET(req) {
   const url = new URL(req.url);
@@ -14,7 +17,7 @@ export async function GET(req) {
     return NextResponse.json({ error: "missing_or_invalid_shop" }, { status: 400 });
   }
 
-  // 1) If we’re still in an iframe, bounce to the top level
+  // Step 0: if still in iframe, bounce to top level FIRST (no state creation yet)
   if (url.searchParams.get("tld") !== "1") {
     const top = new URL(req.url);
     top.searchParams.set("tld", "1");
@@ -23,16 +26,23 @@ export async function GET(req) {
         var r=${JSON.stringify(top.toString())};
         if (top===self) location.href=r; else top.location.href=r;
       </script>`,
-      { headers: { "Content-Type": "text/html" } }
+      {
+        headers: {
+          "Content-Type": "text/html",
+          "Cache-Control": "no-store",
+        },
+      }
     );
   }
 
-  // 2) Build redirect_uri using THIS request’s host (prevents cookie/host mismatch)
-  const base = `${url.protocol}//${url.host}`;               // <-- critical
+  // Build redirect_uri using THIS host (prevents host/cookie mismatch)
+  const base = `${url.protocol}//${url.host}`;
   const redirectUri = `${base}/api/shopify/callback`;
 
-  // 3) Create and store state
-  const state = crypto.randomUUID();
+  // Create ONCE or reuse the existing state to avoid race overwrites
+  const jar = cookies();
+  let state = jar.get(STATE_COOKIE)?.value;
+  if (!state) state = crypto.randomUUID();
 
   const auth = new URL(`https://${shop}/admin/oauth/authorize`);
   auth.searchParams.set("client_id", process.env.SHOPIFY_API_KEY);
@@ -41,8 +51,9 @@ export async function GET(req) {
   auth.searchParams.set("state", state);
 
   const res = NextResponse.redirect(auth.toString());
+  res.headers.set("Cache-Control", "no-store");
 
-  // Lax is sent on top-level return from Shopify
+  // Lax works for top-level return; set long-lived shop cookie too
   res.cookies.set(STATE_COOKIE, state, {
     httpOnly: true,
     secure: true,
@@ -50,7 +61,7 @@ export async function GET(req) {
     path: "/",
     maxAge: 10 * 60,
   });
-  res.cookies.set("shopify_shop", shop, {
+  res.cookies.set(SHOP_COOKIE, shop, {
     secure: true,
     sameSite: "lax",
     path: "/",
