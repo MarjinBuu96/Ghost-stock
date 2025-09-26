@@ -29,17 +29,23 @@ export async function GET(req) {
     );
   }
 
-  const base        = `${url.protocol}//${url.host}`;
-  const redirectUri = `${base}/api/shopify/callback`;
+  const clientId     = process.env.SHOPIFY_API_KEY;
+  const scopes       = process.env.SHOPIFY_SCOPES || "";
+  const redirectUri  = process.env.SHOPIFY_REDIRECT_URI;
+
+  if (!clientId || !redirectUri) {
+    return NextResponse.json({ error: "missing_env_vars" }, { status: 500 });
+  }
 
   const state = crypto.randomUUID();
   await prisma.oAuthState.create({ data: { state, shop } });
 
   const auth = new URL(`https://${shop}/admin/oauth/authorize`);
-  auth.searchParams.set("client_id", process.env.SHOPIFY_API_KEY || "");
-  auth.searchParams.set("scope", process.env.SHOPIFY_SCOPES || "");
+  auth.searchParams.set("client_id", clientId);
+  auth.searchParams.set("scope", scopes);
   auth.searchParams.set("redirect_uri", redirectUri);
   auth.searchParams.set("state", state);
+  auth.searchParams.set("grant_options[]", "per-user");
 
   const res = NextResponse.redirect(auth.toString());
   res.headers.set("Cache-Control", "no-store");
@@ -51,6 +57,7 @@ export async function GET(req) {
     path:     "/",
     maxAge:   10 * 60,
   });
+
   res.cookies.set(SHOP_COOKIE, shop, {
     secure:   true,
     sameSite: "none",
