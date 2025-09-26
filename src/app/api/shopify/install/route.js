@@ -1,4 +1,3 @@
-// src/app/api/shopify/install/route.ts
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -17,11 +16,8 @@ export async function GET(req) {
     return NextResponse.json({ error: "missing_or_invalid_shop" }, { status: 400 });
   }
 
-  // Only bounce to top-level if not embedded and not already redirected
-  const isEmbedded = url.searchParams.get("embedded") === "1";
-  const isTopLevel = url.searchParams.get("tld") === "1";
-
-  if (isEmbedded && !isTopLevel) {
+  // Bounce out of iframe once
+  if (url.searchParams.get("tld") !== "1") {
     const top = new URL(req.url);
     top.searchParams.set("tld", "1");
     return new Response(
@@ -33,23 +29,17 @@ export async function GET(req) {
     );
   }
 
-  const redirectUri = process.env.SHOPIFY_REDIRECT_URI;
-  const clientId    = process.env.SHOPIFY_API_KEY;
-  const scopes      = process.env.SHOPIFY_SCOPES || "";
-
-  if (!redirectUri || !clientId) {
-    return NextResponse.json({ error: "missing_env_vars" }, { status: 500 });
-  }
+  const base        = `${url.protocol}//${url.host}`;
+  const redirectUri = `${base}/api/shopify/callback`;
 
   const state = crypto.randomUUID();
   await prisma.oAuthState.create({ data: { state, shop } });
 
   const auth = new URL(`https://${shop}/admin/oauth/authorize`);
-  auth.searchParams.set("client_id", clientId);
-  auth.searchParams.set("scope", scopes);
+  auth.searchParams.set("client_id", process.env.SHOPIFY_API_KEY || "");
+  auth.searchParams.set("scope", process.env.SHOPIFY_SCOPES || "");
   auth.searchParams.set("redirect_uri", redirectUri);
   auth.searchParams.set("state", state);
-  auth.searchParams.set("grant_options[]", "per-user");
 
   const res = NextResponse.redirect(auth.toString());
   res.headers.set("Cache-Control", "no-store");
@@ -61,7 +51,6 @@ export async function GET(req) {
     path:     "/",
     maxAge:   10 * 60,
   });
-
   res.cookies.set(SHOP_COOKIE, shop, {
     secure:   true,
     sameSite: "none",
