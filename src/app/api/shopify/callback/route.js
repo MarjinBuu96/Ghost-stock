@@ -11,7 +11,7 @@ const STATE_MAX_AGE_MS = 15 * 60 * 1000;
 const STATE_COOKIE = "shopify_oauth_state";
 const SHOP_COOKIE  = "shopify_shop";
 
-export async function GET(req: Request) {
+export async function GET(req) {
   const url = new URL(req.url);
   const shop  = (url.searchParams.get("shop")  || "").toLowerCase();
   const state = url.searchParams.get("state") || "";
@@ -22,12 +22,14 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "invalid_shop" }, { status: 400 });
   }
 
-  if (!verifyOAuthQueryHmac(url.searchParams, hmac, process.env.SHOPIFY_API_SECRET!)) {
-    return NextResponse.json({ error: "bad_hmac" }, { status: 401 });
+  const secret = process.env.SHOPIFY_API_SECRET;
+  if (!secret) {
+    return NextResponse.json({ error: "missing_env_secret" }, { status: 500 });
   }
 
-  // TEMP: debug
-  console.log("[callback] shop:", shop, "incoming state:", state);
+  if (!verifyOAuthQueryHmac(url.searchParams, hmac, secret)) {
+    return NextResponse.json({ error: "bad_hmac" }, { status: 401 });
+  }
 
   const rec = await prisma.oAuthState.findUnique({ where: { state } }).catch(() => null);
   const recOk =
@@ -39,7 +41,6 @@ export async function GET(req: Request) {
   const cookieOk = cookieState && cookieState === state;
 
   if (!recOk && !cookieOk) {
-    console.warn("[callback] invalid_state", { shop, state, cookieState, recFound: !!rec });
     return NextResponse.json({ error: "invalid_state" }, { status: 400 });
   }
 
@@ -49,23 +50,30 @@ export async function GET(req: Request) {
 
   const code = url.searchParams.get("code") || "";
   const tokenUrl = `https://${shop}/admin/oauth/access_token`;
+
+  const clientId = process.env.SHOPIFY_API_KEY;
+  const clientSecret = process.env.SHOPIFY_API_SECRET;
+
+  if (!clientId || !clientSecret) {
+    return NextResponse.json({ error: "missing_env_creds" }, { status: 500 });
+  }
+
   const r = await fetch(tokenUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      client_id:     process.env.SHOPIFY_API_KEY,
-      client_secret: process.env.SHOPIFY_API_SECRET,
+      client_id:     clientId,
+      client_secret: clientSecret,
       code,
     }),
   });
 
   const payload = await r.json().catch(() => ({}));
   if (!r.ok || !payload?.access_token) {
-    console.error("[callback] access_token exchange failed", r.status, payload);
     return NextResponse.json({ error: "token_exchange_failed" }, { status: 400 });
   }
 
-  const accessToken = payload.access_token as string;
+  const accessToken = payload.access_token;
 
   await prisma.store.upsert({
     where:  { shop },
