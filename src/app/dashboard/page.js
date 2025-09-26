@@ -4,7 +4,7 @@ import useSWR from "swr";
 import { useState, useMemo, useEffect } from "react";
 import { fetcher } from "@/lib/fetcher";
 
-const fetcher = (u) => fetch(u).then((r) => r.json());
+
 
 function Banner({
   tone = "info", // "info" | "warning" | "success" | "upgrade"
