@@ -38,7 +38,7 @@ export async function GET(req: Request) {
     return NextResponse.json({
       error: "missing_env_vars",
       details: {
-        SHOPIFY_APP_KEY: !!clientId,
+        SHOPIFY_API_KEY: !!clientId,
         SHOPIFY_APP_URL: !!redirectUri,
       },
     }, { status: 500 });
