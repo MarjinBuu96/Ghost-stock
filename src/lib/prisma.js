@@ -1,4 +1,4 @@
-// src/lib/prisma.js
+// src/lib/prisma.ts
 import { PrismaClient } from "@prisma/client";
 
 const globalForPrisma = globalThis;
