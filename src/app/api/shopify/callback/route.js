@@ -73,3 +73,4 @@ export async function GET(req) {
   res.cookies.set("shopify_shop", shop, { secure: true, sameSite: "lax", path: "/", maxAge: 365*24*60*60 });
   return res;
 }
+
