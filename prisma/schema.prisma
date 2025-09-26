@@ -162,3 +162,10 @@ model OAuthState {
 
   @@index([shop, createdAt])
 }
+
+model Kpi {
+  id        String   @id @default(cuid())
+  name      String
+  value     Float
+  createdAt DateTime @default(now())
+}
