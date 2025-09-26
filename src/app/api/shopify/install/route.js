@@ -9,7 +9,7 @@ import { prisma } from "@/lib/prisma";
 const STATE_COOKIE = "shopify_oauth_state";
 const SHOP_COOKIE  = "shopify_shop";
 
-export async function GET(req: Request) {
+export async function GET(req) {
   const url  = new URL(req.url);
   const shop = (url.searchParams.get("shop") || "").toLowerCase();
 
