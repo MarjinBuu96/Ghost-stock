@@ -30,7 +30,7 @@ export async function GET(req: Request) {
   }
 
   // ✅ Updated to match Vercel env vars
-  const clientId     = process.env.SHOPIFY_APP_KEY;
+  const clientId     = process.env.SHOPIFY_API_KEY;
   const scopes       = process.env.SHOPIFY_SCOPES || "";
   const redirectUri  = process.env.SHOPIFY_APP_URL;
 
