@@ -1,7 +1,12 @@
 // src/lib/shopifyRest.js
 
+// Centralize API version in one place
+const API_VERSION = "2025-07";
+
 // ---------- tiny retry helper ----------
-async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+async function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
 
 async function fetchWithRetry(url, opts = {}, tries = 5) {
   let attempt = 0;
@@ -18,24 +23,42 @@ async function fetchWithRetry(url, opts = {}, tries = 5) {
       await sleep(retryAfter ? retryAfter * 1000 : attempt * 500);
       continue;
     }
-    return res; // let caller surface the error details
+    return res; // let caller decide
   }
 }
 
 // ---------- utils ----------
+function normalizePathOrUrl(shop, pathOrUrl) {
+  // Accept either: "products.json" OR "https://.../admin/api/XXXX-YY/products.json"
+  if (/^https?:\/\//i.test(pathOrUrl)) {
+    const u = new URL(pathOrUrl);
+    // keep querystring if present
+    return u.toString();
+  }
+  return `https://${shop}/admin/api/${API_VERSION}/${pathOrUrl.replace(/^\/+/, "")}`;
+}
+
 function buildUrl(shop, path, search = {}) {
-  const url = new URL(`https://${shop}/admin/api/2025-07/${path}`);
+  const url = new URL(normalizePathOrUrl(shop, path));
   Object.entries(search).forEach(([k, v]) => {
-    if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, v);
+    if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, String(v));
   });
   return url.toString();
 }
 
 function nextLinkFromHeaders(headers) {
   const link = headers.get("link") || headers.get("Link") || "";
-  if (!link || !link.includes('rel="next"')) return null;
-  const m = link.match(/<([^>]+)>;\s*rel="next"/i);
-  return m ? m[1] : null; // full next URL
+  if (!link) return null;
+  // Shopify may send multiple link rels. Find "rel=\"next\"".
+  const m = link.match(/<([^>]+)>\s*;\s*rel="next"/i);
+  if (!m) return null;
+  try {
+    // ensure it’s an absolute URL
+    const u = new URL(m[1]);
+    return u.toString();
+  } catch {
+    return null;
+  }
 }
 
 function toNumber(n, fallback = 0) {
@@ -45,8 +68,8 @@ function toNumber(n, fallback = 0) {
 }
 
 // ---------- low-level GET ----------
-export async function shopifyGetRaw(shop, token, path, search = {}) {
-  const url = buildUrl(shop, path, search);
+export async function shopifyGetRaw(shop, token, pathOrUrl, search = {}) {
+  const url = buildUrl(shop, pathOrUrl, search);
   const res = await fetchWithRetry(url, {
     headers: {
       "X-Shopify-Access-Token": token,
@@ -56,8 +79,20 @@ export async function shopifyGetRaw(shop, token, path, search = {}) {
 
   const text = await res.text().catch(() => "");
   let body = text;
-  try { body = JSON.parse(text); } catch {}
-  return { ok: res.ok, status: res.status, body, headers: res.headers, text, url };
+  try {
+    body = text ? JSON.parse(text) : {};
+  } catch {
+    // leave as raw text if not JSON
+  }
+
+  return {
+    ok: res.ok,
+    status: res.status,
+    body,
+    headers: res.headers,
+    text,
+    url,
+  };
 }
 
 // ---------- inventory (single-location fallback from variant.inventory_quantity) ----------
@@ -67,23 +102,30 @@ export async function getInventoryByVariant(shop, token) {
 
   while (pageUrl) {
     const { ok, status, body, headers, text, url } = await shopifyGetRaw(
-      shop, token, pageUrl.replace(/^https:\/\/[^/]+\/admin\/api\/2024-07\//, ""), {}
+      shop,
+      token,
+      pageUrl // accept full URL
     );
 
     if (!ok) {
-      throw new Error(`GET ${url} -> HTTP ${status} ${typeof body === "string" ? body : text}`);
+      throw new Error(
+        `GET ${url} -> HTTP ${status}${
+          typeof body === "string" ? ` ${body}` : text ? ` ${text}` : ""
+        }`
+      );
     }
 
-    const products = body?.products ?? [];
+    const products = Array.isArray(body?.products) ? body.products : [];
     for (const p of products) {
-      for (const v of (p.variants ?? [])) {
+      const variants = Array.isArray(p?.variants) ? p.variants : [];
+      for (const v of variants) {
         rows.push({
-          sku: v.sku || `${p.id}-${v.id}`,
-          product: p.title,
-          variantId: v.id,
-          inventory_item_id: v.inventory_item_id,
-          systemQty: typeof v.inventory_quantity === "number" ? v.inventory_quantity : 0,
-          price: toNumber(v.price, 0),
+          sku: v?.sku || `${p?.id}-${v?.id}`,
+          product: p?.title ?? "",
+          variantId: v?.id ?? null,
+          inventory_item_id: v?.inventory_item_id ?? null,
+          systemQty: typeof v?.inventory_quantity === "number" ? v.inventory_quantity : 0,
+          price: toNumber(v?.price, 0),
         });
       }
     }
@@ -120,21 +162,29 @@ export async function getSalesByVariant(shop, token, daysBack = 14) {
 
     const text = await res.text().catch(() => "");
     if (!res.ok) {
-      throw new Error(`GET ${pageUrl} -> HTTP ${res.status} ${text}`);
+      throw new Error(`GET ${pageUrl} -> HTTP ${res.status}${text ? ` ${text}` : ""}`);
     }
 
     let body = {};
-    try { body = text ? JSON.parse(text) : {}; } catch {}
+    try {
+      body = text ? JSON.parse(text) : {};
+    } catch {
+      body = {};
+    }
 
-    const orders = body?.orders ?? [];
+    const orders = Array.isArray(body?.orders) ? body.orders : [];
     for (const o of orders) {
-      for (const li of (o.line_items ?? [])) {
+      const items = Array.isArray(o?.line_items) ? o.line_items : [];
+      for (const li of items) {
         const key =
-          li.sku ||
-          (li.variant_id != null ? String(li.variant_id) :
-            (li.product_id != null ? String(li.product_id) : null));
+          li?.sku ||
+          (li?.variant_id != null
+            ? String(li.variant_id)
+            : li?.product_id != null
+            ? String(li.product_id)
+            : null);
         if (!key) continue;
-        sales.set(key, (sales.get(key) || 0) + (li.quantity || 0));
+        sales.set(key, (sales.get(key) || 0) + (li?.quantity || 0));
       }
     }
 
@@ -159,8 +209,15 @@ export async function getInventorySnapshot(shop, accessToken, { multiLocation = 
 
   while (pageUrl) {
     const r = await fetchWithRetry(pageUrl, { headers });
-    if (!r.ok) throw new Error(`Products fetch failed ${r.status}`);
-    const json = await r.json();
+    const text = await r.text().catch(() => "");
+    if (!r.ok) throw new Error(`Products fetch failed ${r.status}${text ? ` ${text}` : ""}`);
+
+    let json = {};
+    try {
+      json = text ? JSON.parse(text) : {};
+    } catch {
+      json = {};
+    }
 
     for (const p of json.products || []) {
       for (const v of p.variants || []) {
@@ -184,7 +241,7 @@ export async function getInventorySnapshot(shop, accessToken, { multiLocation = 
 
   // Sum inventory_levels across ALL locations per inventory_item_id
   const byItem = new Map(); // inventory_item_id -> total available
-  const itemIds = rows.map(r => r.inventory_item_id).filter(Boolean);
+  const itemIds = rows.map((r) => r.inventory_item_id).filter(Boolean);
 
   const chunk = (arr, size) =>
     arr.reduce((a, _, i) => (i % size ? a : [...a, arr.slice(i, i + size)]), []);
@@ -198,8 +255,18 @@ export async function getInventorySnapshot(shop, accessToken, { multiLocation = 
 
       while (next) {
         const res = await fetchWithRetry(next, { headers });
-        if (!res.ok) throw new Error(`inventory_levels fetch failed ${res.status}`);
-        const data = await res.json();
+        const txt = await res.text().catch(() => "");
+        if (!res.ok)
+          throw new Error(
+            `inventory_levels fetch failed ${res.status}${txt ? ` ${txt}` : ""}`
+          );
+
+        let data = {};
+        try {
+          data = txt ? JSON.parse(txt) : {};
+        } catch {
+          data = {};
+        }
 
         for (const lvl of data.inventory_levels || []) {
           const id = lvl.inventory_item_id;
@@ -217,7 +284,10 @@ export async function getInventorySnapshot(shop, accessToken, { multiLocation = 
       if (typeof sum === "number") r.systemQty = sum;
     }
   } catch (e) {
-    console.warn("Multi-location inventory_levels failed, falling back:", e?.message || e);
+    console.warn(
+      "Multi-location inventory_levels failed, falling back:",
+      e?.message || e
+    );
     // silently fall back to variant.inventory_quantity
   }
 
@@ -228,5 +298,3 @@ export async function getInventorySnapshot(shop, accessToken, { multiLocation = 
 export async function getInventoryByVariantMultiLocation(shop, accessToken) {
   return getInventorySnapshot(shop, accessToken, { multiLocation: true });
 }
-
-
