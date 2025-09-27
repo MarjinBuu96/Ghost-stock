@@ -11,12 +11,6 @@ export const metadata = {
 export default function RootLayout({ children }) {
   return (
     <html lang="en">
-      {/* 👇 Load App Bridge via CDN */}
-      <Script
-        src="https://unpkg.com/@shopify/app-bridge@3.6.11/umd/index.js"
-        strategy="beforeInteractive"
-      />
-
       <body className="bg-gray-900 text-white min-h-screen">
         <nav className="bg-gray-800 text-white px-6 py-4 flex items-center justify-between">
           <h1 className="text-xl font-bold">
