@@ -31,40 +31,44 @@ function Banner({ tone = "info", title, body, children }) {
 // ⬇️ Your original component, unchanged, just renamed
 function DashboardInner() {
   // Shopify App Bridge init (already added)
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const shopDomain = new URLSearchParams(window.location.search).get("shop");
-    if (!shopDomain) return;
+// Shopify App Bridge init (patched to prefer `host`, fallback to `shopOrigin`)
+useEffect(() => {
+  if (typeof window === "undefined") return;
 
-    const app = createApp({
-      apiKey: "5860dca7a3c5d0818a384115d221179a",
-      shopOrigin: shopDomain,
-      forceRedirect: true,
-    });
+  const params = new URLSearchParams(window.location.search);
+  const host = params.get("host");
+  const shopDomain = params.get("shop");
 
-    // ✅ ADDED: transparently attach session tokens to your own API calls
-    // We only intercept calls to same-origin `/api/*`.
-    const originalFetch = window.fetch.bind(window);
-    window.fetch = async (input, init = {}) => {
-      try {
-        const url = typeof input === "string" ? input : input?.url || "";
-        if (url.startsWith("/api")) {
-          const token = await fetchSessionToken(app);
-          const headers = new Headers(init.headers || {});
-          headers.set("Authorization", `Bearer ${token}`);
-          return originalFetch(input, { ...init, headers });
-        }
-      } catch (_) {
-        // Fall through to the original fetch on any error (no breakage)
+  if (!host && !shopDomain) return;
+
+  const app = createApp({
+    apiKey: "5860dca7a3c5d0818a384115d221179a",
+    ...(host ? { host } : { shopOrigin: shopDomain }),
+    forceRedirect: true,
+  });
+
+  // ✅ Attach session tokens to same-origin /api/* calls
+  const originalFetch = window.fetch.bind(window);
+  window.fetch = async (input, init = {}) => {
+    try {
+      const url = typeof input === "string" ? input : input?.url || "";
+      if (url.startsWith("/api")) {
+        const token = await fetchSessionToken(app);
+        const headers = new Headers(init.headers || {});
+        headers.set("Authorization", `Bearer ${token}`);
+        return originalFetch(input, { ...init, headers });
       }
-      return originalFetch(input, init);
-    };
+    } catch (_) {
+      // fall through
+    }
+    return originalFetch(input, init);
+  };
 
-    // cleanup: restore original fetch on unmount
-    return () => {
-      window.fetch = originalFetch;
-    };
-  }, []);
+  return () => {
+    window.fetch = originalFetch;
+  };
+}, []);
+
 
   // Alerts
   const { data, error, isLoading, mutate } = useSWR("/api/alerts", fetcher, { refreshInterval: 0 });
