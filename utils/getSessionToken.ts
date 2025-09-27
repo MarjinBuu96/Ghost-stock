@@ -5,6 +5,7 @@ export async function getSessionToken(
   if (typeof window === 'undefined') {
     throw new Error('getSessionToken must be called in the browser');
   }
-  const { getSessionToken: fetchSessionToken } = await import('@shopify/app-bridge/utilities');
+  // ✅ FIX: use the correct package name and dynamic import
+  const { getSessionToken: fetchSessionToken } = await import('@shopify/app-bridge-utils');
   return fetchSessionToken(app);
 }

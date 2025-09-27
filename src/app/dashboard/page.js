@@ -4,6 +4,7 @@ import useSWR from "swr";
 import { useState, useMemo, useEffect, Suspense } from "react";
 import { fetcher } from "@/lib/fetcher"; // keep only this import
 import createApp from "@shopify/app-bridge"; // (added earlier)
+import { getSessionToken as fetchSessionToken } from "@/utils/getSessionToken"; // ✅ ADDED
 
 function Banner({ tone = "info", title, body, children }) {
   const styles =
@@ -35,11 +36,34 @@ function DashboardInner() {
     const shopDomain = new URLSearchParams(window.location.search).get("shop");
     if (!shopDomain) return;
 
-    createApp({
+    const app = createApp({
       apiKey: "5860dca7a3c5d0818a384115d221179a",
       shopOrigin: shopDomain,
       forceRedirect: true,
     });
+
+    // ✅ ADDED: transparently attach session tokens to your own API calls
+    // We only intercept calls to same-origin `/api/*`.
+    const originalFetch = window.fetch.bind(window);
+    window.fetch = async (input, init = {}) => {
+      try {
+        const url = typeof input === "string" ? input : input?.url || "";
+        if (url.startsWith("/api")) {
+          const token = await fetchSessionToken(app);
+          const headers = new Headers(init.headers || {});
+          headers.set("Authorization", `Bearer ${token}`);
+          return originalFetch(input, { ...init, headers });
+        }
+      } catch (_) {
+        // Fall through to the original fetch on any error (no breakage)
+      }
+      return originalFetch(input, init);
+    };
+
+    // cleanup: restore original fetch on unmount
+    return () => {
+      window.fetch = originalFetch;
+    };
   }, []);
 
   // Alerts

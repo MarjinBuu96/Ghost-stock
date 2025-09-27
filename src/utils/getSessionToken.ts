@@ -1,11 +1,11 @@
-// src/utils/getSessionToken.ts
-type ClientApplication = import('@shopify/app-bridge').ClientApplication;
-
-export async function getSessionToken(app: ClientApplication): Promise<string> {
+// utils/getSessionToken.ts
+export async function getSessionToken(
+  app: import('@shopify/app-bridge').ClientApplication
+): Promise<string> {
   if (typeof window === 'undefined') {
     throw new Error('getSessionToken must be called in the browser');
   }
-  // Use the maintained utilities entrypoint (not the deprecated app-bridge-utils pkg)
-  const { getSessionToken: fetchSessionToken } = await import('@shopify/app-bridge/utilities');
+  // ✅ FIX: use the correct package name and dynamic import
+  const { getSessionToken: fetchSessionToken } = await import('@shopify/app-bridge-utils');
   return fetchSessionToken(app);
 }
