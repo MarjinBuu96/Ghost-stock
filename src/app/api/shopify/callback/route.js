@@ -10,6 +10,33 @@ const STATE_MAX_AGE_MS = 15 * 60 * 1000;
 const STATE_COOKIE = "shopify_oauth_state";
 const SHOP_COOKIE  = "shopify_shop";
 
+// ✅ ADDED: Register required privacy webhooks on latest API version
+const SHOPIFY_API_VERSION = "2025-07";
+async function ensureComplianceWebhooks(shop, accessToken, appOrigin) {
+  const address = `${appOrigin}/api/shopify/webhooks`;
+  const base = `https://${shop}/admin/api/${SHOPIFY_API_VERSION}/webhooks.json`;
+  const common = {
+    method: "POST",
+    headers: {
+      "X-Shopify-Access-Token": accessToken,
+      "Content-Type": "application/json",
+    },
+  };
+  const payloads = [
+    { webhook: { topic: "customers/data_request", address, format: "json" } },
+    { webhook: { topic: "customers/redact",       address, format: "json" } },
+    { webhook: { topic: "shop/redact",            address, format: "json" } },
+  ];
+  for (const body of payloads) {
+    try {
+      await fetch(base, { ...common, body: JSON.stringify(body) });
+    } catch (e) {
+      // Don’t fail install on webhook issues; just log.
+      console.error("Compliance webhook registration failed:", body.webhook.topic, e);
+    }
+  }
+}
+
 export async function GET(req) {
   const url = new URL(req.url);
   const shop  = (url.searchParams.get("shop")  || "").toLowerCase();
@@ -62,6 +89,9 @@ export async function GET(req) {
     update: { accessToken, updatedAt: new Date() },
     create: { shop, accessToken, userEmail: shop, createdAt: new Date() },
   });
+
+  // ✅ ADDED: Register the 3 required privacy webhooks (latest API version)
+  await ensureComplianceWebhooks(shop, accessToken, url.origin);
 
   const res = NextResponse.redirect(new URL("/dashboard", url.origin));
   res.cookies.set(SHOP_COOKIE, shop, {
