@@ -5,6 +5,7 @@ import { useState, useMemo, useEffect, Suspense } from "react";
 import { fetcher } from "@/lib/fetcher"; // keep only this import
 import createApp from "@shopify/app-bridge"; // (added earlier)
 import { getSessionToken as fetchSessionToken } from "@/utils/getSessionToken"; // ✅ ADDED
+import createApp from '@shopify/app-bridge';
 
 function Banner({ tone = "info", title, body, children }) {
   const styles =
