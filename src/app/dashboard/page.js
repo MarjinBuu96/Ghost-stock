@@ -3,6 +3,7 @@
 import useSWR from "swr";
 import { useState, useMemo, useEffect, Suspense } from "react";
 import { fetcher } from "@/lib/fetcher"; // keep only this import
+import createApp from "@shopify/app-bridge"; // (added earlier)
 
 function Banner({ tone = "info", title, body, children }) {
   const styles =
@@ -28,6 +29,19 @@ function Banner({ tone = "info", title, body, children }) {
 
 // ⬇️ Your original component, unchanged, just renamed
 function DashboardInner() {
+  // Shopify App Bridge init (already added)
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const shopDomain = new URLSearchParams(window.location.search).get("shop");
+    if (!shopDomain) return;
+
+    createApp({
+      apiKey: "5860dca7a3c5d0818a384115d221179a",
+      shopOrigin: shopDomain,
+      forceRedirect: true,
+    });
+  }, []);
+
   // Alerts
   const { data, error, isLoading, mutate } = useSWR("/api/alerts", fetcher, { refreshInterval: 0 });
   const [filter, setFilter] = useState("all");
