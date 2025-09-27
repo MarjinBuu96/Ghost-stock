@@ -1,28 +1,22 @@
-name = "Ghost Stock Killer"
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+
 client_id = "5860dca7a3c5d0818a384115d221179a"
+name = "Ghost Stock Killer"
 application_url = "https://ghost-stock.co.uk"
 embedded = true
 
-[auth]
-redirect_urls = [
-  "https://ghost-stock.co.uk/api/shopify/callback"
-]
-
 [webhooks]
-api_version = "2023-07"
+api_version = "2025-04"
 
-[[webhooks.subscriptions]]
-compliance_topics = [
-  "customers/data_request",
-  "customers/redact",
-  "shop/redact"
-]
-uri = "https://ghost-stock.co.uk/api/shopify/webhooks"
+  [[webhooks.subscriptions]]
+  uri = "/api/shopify/webhooks"
+  compliance_topics = [ "customers/data_request", "customers/redact", "shop/redact" ]
 
-[build]
+[access_scopes]
+# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
+scopes = "read_inventory,read_orders,read_products"
+optional_scopes = [ ]
+use_legacy_install_flow = false
 
-
-# Optional: normal (non-compliance) topics you also handle
-# [[webhooks.subscriptions]]
-# topics = ["orders/create", "inventory_levels/update"]
-# uri = "https://ghost-stock.co.uk/api/shopify/webhooks"
+[auth]
+redirect_urls = [ "https://ghost-stock.co.uk/api/shopify/callback" ]

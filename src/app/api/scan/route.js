@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/authOptions"; // if alias fails, use: "../../../lib/authOptions"
 import { prisma } from "@/lib/prisma";           // or "../../../lib/prisma"
+import { cookies } from "next/headers";
 
 import { getInventoryByVariant, getSalesByVariant } from "@/lib/shopifyRest"; // your helpers
 import { computeAlerts } from "@/lib/alertsEngine";                           // your rules
@@ -17,19 +18,23 @@ function makeUniqueHash(a) {
 export async function POST() {
   try {
     const session = await getServerSession(authOptions);
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-    }
+    const shopCookie = cookies().get("shopify_shop")?.value || "";
 
     // Validate required env
     if (!process.env.SHOPIFY_API_KEY || !process.env.SHOPIFY_API_SECRET) {
       return NextResponse.json({ error: "shopify_env_missing" }, { status: 500 });
     }
 
-    // Find connected store for this user
-    const store = await prisma.store.findFirst({
-      where: { userEmail: session.user.email },
-    });
+    // Find connected store: prefer session, fallback to cookie
+    let store = null;
+    if (session?.user?.email) {
+      store = await prisma.store.findFirst({
+        where: { userEmail: session.user.email },
+      });
+    }
+    if (!store && shopCookie) {
+      store = await prisma.store.findUnique({ where: { shop: shopCookie } });
+    }
     if (!store) return NextResponse.json({ error: "no_store" }, { status: 400 });
     if (!store.shop || !store.accessToken) {
       return NextResponse.json({ error: "store_incomplete" }, { status: 400 });
@@ -82,7 +87,7 @@ export async function POST() {
               status: "open",
             },
             create: {
-              userEmail: session.user.email,
+              userEmail: session?.user?.email || store.userEmail,
               storeId: store.id,
               sku: a.sku,
               product: a.product,
@@ -99,13 +104,9 @@ export async function POST() {
     }
 
     await prisma.store.update({
-  where: { id: store.id },
-  data: { lastScanAt: new Date() },
-});
-
-
-
-
+      where: { id: store.id },
+      data: { lastScanAt: new Date() },
+    });
 
     return NextResponse.json({ created_or_updated: alerts.length });
   } catch (err) {
