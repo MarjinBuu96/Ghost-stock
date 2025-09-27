@@ -1,11 +1,8 @@
 export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/authOptions";
-import { prisma } from "@/lib/prisma";
 import { cookies } from "next/headers";
+import { prisma } from "@/lib/prisma";
 
 import { getInventoryByVariant, getSalesByVariant } from "@/lib/shopifyRest";
 import { computeAlerts } from "@/lib/alertsEngine";
@@ -17,23 +14,27 @@ function makeUniqueHash(a) {
 
 export async function POST() {
   try {
-    // Session is optional (embedded apps may use cookie fallback)
+    // ---- (NEW) Safe, optional session lookup via dynamic import ----
     let session = null;
     try {
+      const [{ getServerSession }, { authOptions }] = await Promise.all([
+        import("next-auth"),
+        import("@/lib/authOptions"),
+      ]);
       session = await getServerSession(authOptions);
     } catch (e) {
-      // Don’t crash if next-auth throws (misconfigured in prod, etc.)
-      console.warn("getServerSession failed:", e?.message || e);
+      // If next-auth fails to load (or isn’t configured in this env), don’t crash the route
+      console.warn("Optional next-auth session failed:", e?.message || e);
     }
+    // ---------------------------------------------------------------
 
     const shopCookie = cookies().get("shopify_shop")?.value || "";
 
-    // Required env
     if (!process.env.SHOPIFY_API_KEY || !process.env.SHOPIFY_API_SECRET) {
       return NextResponse.json({ error: "shopify_env_missing" }, { status: 500 });
     }
 
-    // Resolve store (prefer session email, fall back to cookie)
+    // Resolve store by session email first, then by cookie
     let store = null;
     try {
       if (session?.user?.email) {
@@ -75,7 +76,7 @@ export async function POST() {
       const msg = (e?.message || "").toLowerCase();
       const scopeIssue = msg.includes("401") || msg.includes("403");
       if (scopeIssue) {
-        salesMap = {}; // proceed with zero velocity if scope missing
+        salesMap = {}; // proceed without velocity if scope missing
       } else {
         console.error("Orders fetch failed:", e);
         return NextResponse.json(
@@ -85,7 +86,7 @@ export async function POST() {
       }
     }
 
-    // Compute alerts (don’t allow errors to escape)
+    // Compute alerts
     let alerts = [];
     try {
       alerts = computeAlerts(inventory, salesMap) || [];
@@ -98,7 +99,7 @@ export async function POST() {
       );
     }
 
-    // Persist alerts (transaction only if we have work)
+    // Persist alerts
     if (alerts.length > 0) {
       try {
         await prisma.$transaction(
@@ -138,7 +139,7 @@ export async function POST() {
       }
     }
 
-    // Update last scan timestamp (don’t fail the whole request if this write fails)
+    // Update last scanned (don’t fail request if this write errors)
     try {
       await prisma.store.update({
         where: { id: store.id },
@@ -151,7 +152,6 @@ export async function POST() {
     return NextResponse.json({ created_or_updated: alerts.length });
   } catch (err) {
     console.error("SCAN ROUTE FATAL:", err);
-    // Always return JSON so Vercel doesn't surface a 502
     return NextResponse.json(
       { error: "unexpected_server_error", message: err?.message || String(err) },
       { status: 500 }
