@@ -1,8 +1,11 @@
 "use client";
 
 import useSWR from "swr";
-import { useState, useMemo, useEffect } from "react";
-import { fetcher } from "@/lib/fetcher"; // keep only this import
+import { useState, useMemo, useEffect, useCallback } from "react";
+import { useSearchParams } from "next/navigation";
+import createApp from "@shopify/app-bridge";
+import { getSessionToken } from "@/utils/getSessionToken";
+import { fetcher as baseFetcher } from "@/lib/fetcher"; // keep only this import originally; we still use it under the hood
 
 function Banner({ tone = "info", title, body, children }) {
   const styles =
@@ -27,11 +30,76 @@ function Banner({ tone = "info", title, body, children }) {
 }
 
 export default function Dashboard() {
-  // Alerts
-  const { data, error, isLoading, mutate } = useSWR("/api/alerts", fetcher, { refreshInterval: 0 });
+  // ---- Shopify App Bridge + Session Token ----
+  const searchParams = useSearchParams();
+  const host = searchParams.get("host") ?? "";
+  const apiKey = process.env.NEXT_PUBLIC_SHOPIFY_API_KEY!;
+  const [token, setToken] = useState<string | null>(null);
+
+  // create app + get token
+  useEffect(() => {
+    if (!apiKey || !host) return;
+
+    let mounted = true;
+    const app = createApp({ apiKey, host, forceRedirect: true });
+
+    async function refresh() {
+      try {
+        const t = await getSessionToken(app);
+        if (mounted) setToken(t);
+      } catch (e) {
+        console.error("Failed to get session token", e);
+      }
+    }
+
+    // initial + refresh on focus + periodic (tokens are short-lived)
+    refresh();
+    const onFocus = () => refresh();
+    window.addEventListener("focus", onFocus);
+    const iv = setInterval(refresh, 50_000);
+
+    return () => {
+      mounted = false;
+      window.removeEventListener("focus", onFocus);
+      clearInterval(iv);
+    };
+  }, [apiKey, host]);
+
+  // fetch wrapper that adds Authorization when we have a token
+  const authFetch = useCallback(
+    (input: RequestInfo | URL, init: RequestInit = {}) => {
+      const headers = new Headers(init.headers || {});
+      if (token) headers.set("Authorization", `Bearer ${token}`);
+      return fetch(input, { ...init, headers });
+    },
+    [token]
+  );
+
+  // SWR fetcher that respects your existing base fetcher behavior but adds the token
+  const swrFetcher = useCallback(
+    async (url: string) => {
+      // If your baseFetcher expects raw fetch, fall back to native + json here.
+      // Prefer calling your baseFetcher when possible:
+      const res = await authFetch(url);
+      // If baseFetcher does more (throw on !ok, etc.), mirror that here as needed.
+      if (!res.ok) {
+        const err: any = new Error("Request failed");
+        try {
+          err.info = await res.json();
+        } catch {}
+        err.status = res.status;
+        throw err;
+      }
+      return res.json();
+    },
+    [authFetch]
+  );
+
+  // ---- Alerts ----
+  const { data, error, isLoading, mutate } = useSWR("/api/alerts", swrFetcher, { refreshInterval: 0 });
   const [filter, setFilter] = useState("all");
   const [isScanning, setIsScanning] = useState(false);
-  const [countingIds, setCountingIds] = useState(() => new Set());
+  const [countingIds, setCountingIds] = useState<Set<string | number>>(() => new Set());
 
   // Track “first scan done”
   const [hasScanned, setHasScanned] = useState(false);
@@ -50,7 +118,7 @@ export default function Dashboard() {
   }, [data?.alerts?.length, hasScanned]);
 
   // Connected stores
-  const { data: storesData } = useSWR("/api/me/stores", fetcher);
+  const { data: storesData } = useSWR("/api/me/stores", swrFetcher);
   const stores = storesData?.stores ?? [];
   const hasStore = stores.length > 0;
 
@@ -60,7 +128,7 @@ export default function Dashboard() {
     error: invErr,
     isLoading: invLoading,
     mutate: invMutate,
-  } = useSWR("/api/debug/inventory", fetcher, { refreshInterval: 0 });
+  } = useSWR("/api/debug/inventory", swrFetcher, { refreshInterval: 0 });
   const invRows = invData?.items ?? [];
   const invCount = invData?.count ?? 0;
 
@@ -69,14 +137,14 @@ export default function Dashboard() {
     data: kpis,
     isLoading: kpisLoading,
     mutate: mutateKpis,
-  } = useSWR("/api/kpis", fetcher, {
+  } = useSWR("/api/kpis", swrFetcher, {
     refreshInterval: 15000,
     revalidateOnFocus: true,
     dedupingInterval: 5000,
   });
 
   // User settings
-  const { data: settingsData, mutate: mutateSettings } = useSWR("/api/settings", fetcher, { refreshInterval: 0 });
+  const { data: settingsData, mutate: mutateSettings } = useSWR("/api/settings", swrFetcher, { refreshInterval: 0 });
   const currency = settingsData?.settings?.currency ?? "USD";
   const plan = String(settingsData?.settings?.plan || "starter").toLowerCase();
   const isStarter = plan === "starter";
@@ -84,7 +152,7 @@ export default function Dashboard() {
   const slackConfigured = !!settingsData?.settings?.slackWebhookUrl;
   const emailConfigured = !!settingsData?.settings?.notificationEmail;
 
-  function formatCurrency(n, ccy = currency) {
+  function formatCurrency(n: number, ccy = currency) {
     try {
       return new Intl.NumberFormat(undefined, { style: "currency", currency: ccy }).format(n ?? 0);
     } catch {
@@ -100,16 +168,27 @@ export default function Dashboard() {
   const alerts = useMemo(() => {
     const a = data?.alerts ?? [];
     if (filter === "all") return a;
-    if (filter === "high") return a.filter((x) => x.severity === "high");
-    if (filter === "med") return a.filter((x) => x.severity === "med");
+    if (filter === "high") return a.filter((x: any) => x.severity === "high");
+    if (filter === "med") return a.filter((x: any) => x.severity === "med");
     return a;
   }, [data, filter]);
 
-  async function resolve(id) {
+  // ---- Actions that call your API (now token-aware) ----
+  const postJSON = useCallback(
+    (url: string, body?: unknown) =>
+      authFetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: body ? JSON.stringify(body) : undefined,
+      }),
+    [authFetch]
+  );
+
+  async function resolve(id: string | number) {
     const prev = data;
-    const next = { alerts: (data?.alerts ?? []).filter((a) => a.id !== id) };
+    const next = { alerts: (data?.alerts ?? []).filter((a: any) => a.id !== id) };
     mutate(next, false);
-    const res = await fetch(`/api/alerts/${id}/resolve`, { method: "POST" });
+    const res = await postJSON(`/api/alerts/${id}/resolve`);
     if (!res.ok) mutate(prev, false);
     else {
       setCountingIds((prevSet) => {
@@ -121,10 +200,10 @@ export default function Dashboard() {
     }
   }
 
-  async function startCount(id) {
+  async function startCount(id: string | number) {
     setCountingIds((prevSet) => new Set(prevSet).add(id));
     try {
-      const res = await fetch(`/api/alerts/${id}/start-count`, { method: "POST" });
+      const res = await postJSON(`/api/alerts/${id}/start-count`);
       if (!res.ok) throw new Error("failed");
       await Promise.all([mutate(), mutateKpis()]);
     } catch (e) {
@@ -141,7 +220,7 @@ export default function Dashboard() {
   async function scan() {
     try {
       setIsScanning(true);
-      const res = await fetch("/api/shopify/scan", { method: "POST" });
+      const res = await postJSON("/api/shopify/scan");
       if (res.ok) {
         setHasScanned(true);
         try {
@@ -150,7 +229,7 @@ export default function Dashboard() {
         await Promise.all([mutate(), invMutate(), mutateKpis()]);
         return;
       }
-      let payload = {};
+      let payload: any = {};
       try {
         payload = await res.json();
       } catch {}
@@ -172,22 +251,14 @@ export default function Dashboard() {
     }
   }
 
-  async function changeCurrency(newCcy) {
-    await fetch("/api/settings", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ currency: newCcy }),
-    });
+  async function changeCurrency(newCcy: string) {
+    await postJSON("/api/settings", { currency: newCcy });
     await Promise.all([mutateSettings(), mutateKpis()]);
   }
 
-  async function upgradeTo(planName) {
+  async function upgradeTo(planName: string) {
     try {
-      const res = await fetch("/api/shopify/billing/upgrade", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ plan: planName }),
-      });
+      const res = await postJSON("/api/shopify/billing/upgrade", { plan: planName });
       const json = await res.json().catch(() => ({}));
       if (!res.ok || !json?.confirmationUrl) throw new Error(json?.error || "Upgrade failed");
       window.location.href = json.confirmationUrl;
@@ -197,7 +268,7 @@ export default function Dashboard() {
     }
   }
 
-  // Banners
+  // ---- Banners ----
   const showRunScanBanner = hasStore && !isScanning && !hasScanned;
   const showFinishAlertsSetup = hasStore && canUseIntegrations && (!slackConfigured || !emailConfigured);
   const showUpgradeProBanner = hasStore && isStarter && (liveCount > 0 || atRiskRevenue > 0);
@@ -356,7 +427,7 @@ export default function Dashboard() {
                   {error && (
                     <tr><td colSpan={6} className="px-4 py-6 text-center text-red-400">Failed to load alerts</td></tr>
                   )}
-                  {!isLoading && !error && alerts.map((a) => (
+                  {!isLoading && !error && alerts.map((a: any) => (
                     <tr key={a.id} className="odd:bg-gray-900/30">
                       <td className="px-4 py-2 font-mono">{a.sku}</td>
                       <td className="px-4 py-2">{a.product}</td>
@@ -499,7 +570,7 @@ export default function Dashboard() {
               {!invLoading && !invErr && invRows.length === 0 && (
                 <tr><td colSpan={5} className="px-4 py-6 text-center text-gray-400">No variants found</td></tr>
               )}
-              {!invLoading && !invErr && invRows.map((r, i) => (
+              {!invLoading && !invErr && invRows.map((r: any, i: number) => (
                 <tr key={`${r.variantId}-${i}`} className="odd:bg-gray-900/30">
                   <td className="px-4 py-2 font-mono">{r.sku || r.variantId}</td>
                   <td className="px-4 py-2">{r.product}</td>
