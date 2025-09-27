@@ -24,7 +24,7 @@ async function fetchWithRetry(url, opts = {}, tries = 5) {
 
 // ---------- utils ----------
 function buildUrl(shop, path, search = {}) {
-  const url = new URL(`https://${shop}/admin/api/2024-07/${path}`);
+  const url = new URL(`https://${shop}/admin/api/2025-07/${path}`);
   Object.entries(search).forEach(([k, v]) => {
     if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, v);
   });

@@ -6,7 +6,7 @@ import { authOptions } from "@/lib/authOptions";
 import { prisma } from "@/lib/prisma";
 
 async function shopifyGet(shop, token, path) {
-  const url = `https://${shop}/admin/api/2024-07/${path}`;
+  const url = `https://${shop}/admin/api/2025-07/${path}`;
   const res = await fetch(url, {
     headers: { "X-Shopify-Access-Token": token, "Content-Type": "application/json" },
   });

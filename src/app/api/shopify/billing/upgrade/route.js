@@ -85,7 +85,7 @@ export async function POST(req) {
       currency: currencyCode,
     };
 
-    const resp = await fetch(`https://${store.shop}/admin/api/2024-07/graphql.json`, {
+    const resp = await fetch(`https://${store.shop}/admin/api/2025-07/graphql.json`, {
       method: "POST",
       headers: {
         "X-Shopify-Access-Token": store.accessToken,
