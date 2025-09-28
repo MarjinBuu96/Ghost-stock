@@ -86,7 +86,7 @@ function DashboardInner() {
   // Alerts
   const { data, error, isLoading, mutate } = useSWR("/api/alerts", fetcher, { refreshInterval: 0 });
 
-  // Track “first scan done”
+  // Track “first scan done”done
   useEffect(() => {
     try {
       if (localStorage.getItem("hasScanned") === "1") setHasScanned(true);
