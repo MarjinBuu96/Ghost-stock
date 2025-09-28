@@ -43,6 +43,8 @@ model UserSettings {
   notificationEmail String?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
+  scanCount      Int      @default(0)
+  lastScanReset  DateTime @default(now())
 }
 
 model Organization {
