@@ -4,12 +4,12 @@ generator client {
 
 datasource db {
   provider  = "postgresql"
-  url       = env("DATABASE_URL")   // pooled connection (Neon Pooler)
-  directUrl = env("DIRECT_URL")     // direct connection (writer)
+  url       = env("DATABASE_URL") // pooled connection (Neon Pooler)
+  directUrl = env("DIRECT_URL") // direct connection (writer)
 }
 
 model Alert {
-  id        String   @id @default(cuid())
+  id        String @id @default(cuid())
   userEmail String
 
   // Relation to Store (required)
@@ -21,7 +21,7 @@ model Alert {
   systemQty   Int
   expectedMin Int
   expectedMax Int
-  severity    String           // "high" | "med"
+  severity    String // "high" | "med"
   status      String   @default("open")
   createdAt   DateTime @default(now())
 
@@ -32,6 +32,7 @@ model Alert {
   @@index([userEmail, status])
   @@index([storeId, status])
 }
+
 model UserSettings {
   id                String   @id @default(cuid())
   userEmail         String   @unique
@@ -40,18 +41,17 @@ model UserSettings {
   stripeCustomerId  String?
   slackWebhookUrl   String?
   notificationEmail String?
-  scanCount         Int      @default(0)         // ✅ NEW
-  lastScanReset     DateTime @default(now())     // ✅ NEW
+  scanCount         Int      @default(0) // 
+  lastScanReset     DateTime @default(now()) // 
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 }
 
-
 model Organization {
-  id            String        @id @default(cuid())
-  name          String
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
+  id        String   @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   stores        Store[]
   memberships   Membership[]
@@ -61,12 +61,12 @@ model Organization {
 }
 
 model Membership {
-  id        String   @id @default(cuid())
-  orgId     String
-  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  id    String       @id @default(cuid())
+  orgId String
+  org   Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
   userEmail String
-  role      String        // 'owner' | 'manager' | 'viewer'
+  role      String // 'owner' | 'manager' | 'viewer'
 
   createdAt DateTime @default(now())
 
@@ -75,15 +75,15 @@ model Membership {
 }
 
 model AuditLog {
-  id        String   @id @default(cuid())
+  id String @id @default(cuid())
 
   // Make org optional so we can log before org is created
-  orgId     String?
-  org       Organization? @relation(fields: [orgId], references: [id], onDelete: SetNull)
+  orgId String?
+  org   Organization? @relation(fields: [orgId], references: [id], onDelete: SetNull)
 
-  actor     String          // email (or shop string)
-  action    String          // e.g. "alert.resolve", "count.start", "rule.create"
-  target    String?         // e.g. alertId / sessionId / ruleId / sku
+  actor     String // email (or shop string)
+  action    String // e.g. "alert.resolve", "count.start", "rule.create"
+  target    String? // e.g. alertId / sessionId / ruleId / sku
   meta      Json?
   createdAt DateTime @default(now())
 
@@ -92,73 +92,73 @@ model AuditLog {
 }
 
 model Rule {
-  id         String   @id @default(cuid())
-  orgId      String
-  org        Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  id    String       @id @default(cuid())
+  orgId String
+  org   Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
-  name       String
-  isActive   Boolean  @default(true)
-  jsonLogic  Json
+  name      String
+  isActive  Boolean @default(true)
+  jsonLogic Json
 
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([orgId, isActive])
 }
 
 model CountSession {
-  id          String   @id @default(cuid())
-  orgId       String
-  org         Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  id    String       @id @default(cuid())
+  orgId String
+  org   Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
-  startedBy   String        // email/shop who started it
-  assignee    String?
-  dueAt       DateTime?
-  status      String  @default("open") // open | completed | canceled
+  startedBy String // email/shop who started it
+  assignee  String?
+  dueAt     DateTime?
+  status    String    @default("open") // open | completed | canceled
 
-  createdAt   DateTime @default(now())
+  createdAt   DateTime  @default(now())
   completedAt DateTime?
 
-  items       CountItem[]
+  items CountItem[]
 }
 
 model CountItem {
-  id         String   @id @default(cuid())
-  sessionId  String
-  session    CountSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  id        String       @id @default(cuid())
+  sessionId String
+  session   CountSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
-  sku        String
-  product    String?
-  expected   Int?
-  counted    Int?
-  status     String  @default("pending") // pending | counted | skipped
+  sku      String
+  product  String?
+  expected Int?
+  counted  Int?
+  status   String  @default("pending") // pending | counted | skipped
 
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model Store {
-  id          String   @id @default(cuid())
+  id String @id @default(cuid())
 
   // org is optional for backfill/new installs
-  orgId       String?
-  org         Organization? @relation(fields: [orgId], references: [id], onDelete: SetNull)
+  orgId String?
+  org   Organization? @relation(fields: [orgId], references: [id], onDelete: SetNull)
 
   userEmail   String
-  shop        String   @unique
+  shop        String    @unique
   accessToken String
   currency    String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
   lastScanAt  DateTime?
 
-  alerts      Alert[]
+  alerts Alert[]
 
   @@index([userEmail])
 }
 
 model OAuthState {
-  state     String   @id           // random UUID, unique
+  state     String   @id // random UUID, unique
   shop      String
   createdAt DateTime @default(now())
 
