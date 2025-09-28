@@ -20,8 +20,8 @@ export async function POST(req) {
       return NextResponse.json({ ok: false, error: "Invalid shop domain" }, { status: 400 });
     }
 
-    // Optional fallback for required fields like userEmail
-    const fallbackEmail = decoded?.email || "unknown@ghost-stock.co.uk";
+    // Fallback email to satisfy schema
+    const fallbackEmail = "unknown@ghost-stock.co.uk";
 
     await prisma.store.upsert({
       where: { shop },
@@ -29,7 +29,7 @@ export async function POST(req) {
       create: {
         shop,
         accessToken: token,
-        userEmail: fallbackEmail, // only if userEmail is required in schema
+        userEmail: fallbackEmail,
       },
     });
 
