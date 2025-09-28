@@ -7,8 +7,10 @@ import { getActiveStore } from "@/lib/getActiveStore";
 export async function GET(req) {
   try {
     const store = await getActiveStore(req);
+    console.log("🔍 Store from getActiveStore:", store);
+
     if (!store || !store.userEmail) {
-      console.error("Missing store or userEmail:", store);
+      console.error("❌ Missing store or userEmail:", store);
       return NextResponse.redirect(new URL("/settings?billing=unauthorized", req.url));
     }
 
@@ -40,6 +42,7 @@ export async function GET(req) {
 
     const json = await resp.json().catch(() => ({}));
     const subs = json?.data?.currentAppInstallation?.activeSubscriptions || [];
+    console.log("📦 Active subscriptions:", subs);
 
     let newPlan = null;
     const names = subs.map((s) => (s?.name || "").toLowerCase());
@@ -52,15 +55,16 @@ export async function GET(req) {
     }
 
     if (newPlan) {
-      console.log(`Updating plan for ${store.userEmail} → ${newPlan}`);
+      console.log(`⚙️ Attempting to update plan for ${store.userEmail} → ${newPlan}`);
 
       try {
         await prisma.userSettings.update({
           where: { userEmail: store.userEmail },
           data: { plan: newPlan },
         });
+        console.log("✅ Plan updated successfully");
       } catch (err) {
-        console.warn("Update failed, trying create:", err);
+        console.warn("⚠️ Update failed, trying create:", err);
         await prisma.userSettings.create({
           data: {
             userEmail: store.userEmail,
@@ -68,14 +72,16 @@ export async function GET(req) {
             plan: newPlan,
           },
         });
+        console.log("✅ Plan created successfully");
       }
 
       return NextResponse.redirect(new URL("/settings?upgraded=1", req.url));
     }
 
+    console.warn("⚠️ No active subscription found");
     return NextResponse.redirect(new URL("/settings?billing=no-active-subscription", req.url));
   } catch (e) {
-    console.error("Billing confirm error:", e);
+    console.error("🔥 Billing confirm error:", e);
     return NextResponse.redirect(new URL("/settings?billing=error", req.url));
   }
 }
