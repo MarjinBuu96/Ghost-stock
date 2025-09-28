@@ -8,6 +8,7 @@ import jwt from "jsonwebtoken";
  */
 export async function getActiveStore(req) {
   let shop = null;
+  let token = null;
 
   // 1️⃣ Try cookie (App Router dynamic API)
   try {
@@ -27,12 +28,14 @@ export async function getActiveStore(req) {
   // 3️⃣ Fallback: decode session token
   if (!shop && req?.headers?.get) {
     const authHeader = req.headers.get("Authorization") || "";
-    const token = authHeader.replace("Bearer ", "");
+    token = authHeader.replace("Bearer ", "");
     const decoded = jwt.decode(token);
 
     if (decoded?.dest) {
       shop = decoded.dest.replace(/^https:\/\/|\/admin$/g, "");
       console.log("🔓 Decoded shop from token:", shop);
+    } else {
+      console.warn("⚠️ Token decoded but missing dest:", decoded);
     }
   }
 
@@ -43,8 +46,15 @@ export async function getActiveStore(req) {
 
   const store = await prisma.store.findUnique({ where: { shop } });
 
-  if (!store || !store.accessToken) {
-    console.warn("❌ Store not found or missing access token:", shop);
+  if (!store) {
+    console.warn("❌ Store not found in DB:", shop);
+    return null;
+  }
+
+  if (!store.accessToken) {
+    console.warn("⚠️ Store found but missing access token:", shop);
+    // Optionally allow read-only access:
+    // return { ...store, accessToken: token };
     return null;
   }
 
