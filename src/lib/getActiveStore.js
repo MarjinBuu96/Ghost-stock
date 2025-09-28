@@ -1,4 +1,3 @@
-// src/lib/getActiveStore.js
 import { cookies as headerCookies } from "next/headers";
 import { prisma } from "@/lib/prisma";
 import jwt from "jsonwebtoken";
@@ -30,10 +29,24 @@ export async function getActiveStore(req) {
     const authHeader = req.headers.get("Authorization") || "";
     const token = authHeader.replace("Bearer ", "");
     const decoded = jwt.decode(token);
-    shop = decoded?.dest?.replace(/^https:\/\/|\/admin$/g, "") || null;
+
+    if (decoded?.dest) {
+      shop = decoded.dest.replace(/^https:\/\/|\/admin$/g, "");
+      console.log("🔓 Decoded shop from token:", shop);
+    }
   }
 
-  if (!shop) return null;
+  if (!shop) {
+    console.warn("❌ No shop found in cookies or token");
+    return null;
+  }
 
-  return await prisma.store.findUnique({ where: { shop } });
+  const store = await prisma.store.findUnique({ where: { shop } });
+
+  if (!store || !store.accessToken) {
+    console.warn("❌ Store not found or missing access token:", shop);
+    return null;
+  }
+
+  return store;
 }
