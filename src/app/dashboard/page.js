@@ -1,11 +1,10 @@
 "use client";
 
 import useSWR from "swr";
-import { useState, useMemo, useEffect, Suspense } from "react";
 import { fetcher } from "@/lib/fetcher"; // keep only this import
 import createApp from "@shopify/app-bridge"; // (added earlier)
 import { getSessionToken as fetchSessionToken } from "@/utils/getSessionToken"; // ✅ ADDED
-
+import { useState, useMemo, useEffect, useRef, Suspense } from "react";
 
 function Banner({ tone = "info", title, body, children }) {
   const styles =
@@ -29,67 +28,63 @@ function Banner({ tone = "info", title, body, children }) {
   );
 }
 
-// ⬇️ Your original component, unchanged, just renamed
+// ⬇️ Your original component, now with everything correctly inside
 function DashboardInner() {
-  // Shopify App Bridge init (already added)
-// Shopify App Bridge init (patched to prefer `host`, fallback to `shopOrigin`)
-useEffect(() => {
-  if (typeof window === "undefined") return;
-
-  const params = new URLSearchParams(window.location.search);
-  const host = params.get("host");
-  const shopDomain = params.get("shop");
-
-  if (!host && !shopDomain) return;
-
-  const app = createApp({
-    apiKey: "5860dca7a3c5d0818a384115d221179a",
-    ...(host ? { host } : { shopOrigin: shopDomain }),
-    forceRedirect: true,
-  });
-
-  // ✅ One-time session token exchange for Shopify compliance
-  fetchSessionToken(app).then((token) => {
-    fetch("/api/auth/session", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
-  });
-
-  // ✅ Attach session tokens to same-origin /api/* calls
-  const originalFetch = window.fetch.bind(window);
-  window.fetch = async (input, init = {}) => {
-    try {
-      const url = typeof input === "string" ? input : input?.url || "";
-      if (url.startsWith("/api")) {
-        const token = await fetchSessionToken(app);
-        const headers = new Headers(init.headers || {});
-        headers.set("Authorization", `Bearer ${token}`);
-        return originalFetch(input, { ...init, headers });
-      }
-    } catch (_) {
-      // fall through
-    }
-    return originalFetch(input, init);
-  };
-
-  return () => {
-    window.fetch = originalFetch;
-  };
-}, []);
-
-
-
-  // Alerts
-  const { data, error, isLoading, mutate } = useSWR("/api/alerts", fetcher, { refreshInterval: 0 });
+  const appRef = useRef(null); // ✅ App Bridge ref
   const [filter, setFilter] = useState("all");
   const [isScanning, setIsScanning] = useState(false);
   const [countingIds, setCountingIds] = useState(() => new Set());
+  const [hasScanned, setHasScanned] = useState(false);
+
+  // App Bridge init + tokenized fetch
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const params = new URLSearchParams(window.location.search);
+    const host = params.get("host");
+    const shopDomain = params.get("shop");
+    if (!host && !shopDomain) return;
+
+    const app = createApp({
+      apiKey: "5860dca7a3c5d0818a384115d221179a",
+      ...(host ? { host } : { shopOrigin: shopDomain }),
+      forceRedirect: true,
+    });
+
+    appRef.current = app;
+
+    // Session token exchange (optional bootstrap)
+    fetchSessionToken(app).then((token) => {
+      fetch("/api/auth/session", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      }).catch(() => {});
+    });
+
+    // Patch fetch to auto-attach token to same-origin /api/*
+    const originalFetch = window.fetch.bind(window);
+    window.fetch = async (input, init = {}) => {
+      try {
+        const url = typeof input === "string" ? input : input?.url || "";
+        if (url.startsWith("/api")) {
+          const token = await fetchSessionToken(app);
+          const headers = new Headers(init.headers || {});
+          headers.set("Authorization", `Bearer ${token}`);
+          return originalFetch(input, { ...init, headers });
+        }
+      } catch (_) {}
+      return originalFetch(input, init);
+    };
+
+    return () => {
+      window.fetch = originalFetch;
+    };
+  }, []);
+
+  // Alerts
+  const { data, error, isLoading, mutate } = useSWR("/api/alerts", fetcher, { refreshInterval: 0 });
 
   // Track “first scan done”
-  const [hasScanned, setHasScanned] = useState(false);
   useEffect(() => {
     try {
       if (localStorage.getItem("hasScanned") === "1") setHasScanned(true);
@@ -193,62 +188,56 @@ useEffect(() => {
     }
   }
 
-async function scan() {
-  try {
-    setIsScanning(true);
+  async function scan() {
+    try {
+      setIsScanning(true);
 
-    // ✅ Get App Bridge instance
-    const params = new URLSearchParams(window.location.search);
-    const host = params.get("host");
-    const shopDomain = params.get("shop");
+      const app = appRef.current;
+      if (!app) {
+        alert("App Bridge not initialized.");
+        return;
+      }
 
-    const app = createApp({
-      apiKey: "5860dca7a3c5d0818a384115d221179a",
-      ...(host ? { host } : { shopOrigin: shopDomain }),
-      forceRedirect: true,
-    });
+      const token = await fetchSessionToken(app);
 
-    // ✅ Fetch session token
-    const token = await fetchSessionToken(app);
+      const res = await fetch("/api/scan", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
 
-    // ✅ Send scan request with token
-    const res = await fetch("/api/shopify/scan", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
+      if (res.ok) {
+        setHasScanned(true);
+        try {
+          localStorage.setItem("hasScanned", "1");
+        } catch {}
+        await Promise.all([mutate(), invMutate(), mutateKpis()]);
+        return;
+      }
 
-    if (res.ok) {
-      setHasScanned(true);
-      try { localStorage.setItem("hasScanned", "1"); } catch {}
-      await Promise.all([mutate(), invMutate(), mutateKpis()]);
-      return;
+      let payload = {};
+      try {
+        payload = await res.json();
+      } catch {}
+
+      if (res.status === 401) {
+        window.location.href = "/login?callbackUrl=/dashboard";
+        return;
+      }
+      if (payload?.error === "no_store") {
+        alert("No Shopify store connected yet. Head to Settings to connect your shop.");
+        window.location.href = "/settings";
+        return;
+      }
+      alert("Scan failed. Please try again.");
+    } catch (e) {
+      console.error(e);
+      alert("Network error while scanning.");
+    } finally {
+      setIsScanning(false);
     }
-
-    let payload = {};
-    try { payload = await res.json(); } catch {}
-
-    if (res.status === 401) {
-      window.location.href = "/login?callbackUrl=/dashboard";
-      return;
-    }
-
-    if (payload?.error === "no_store") {
-      alert("No Shopify store connected yet. Head to Settings to connect your shop.");
-      window.location.href = "/settings";
-      return;
-    }
-
-    alert("Scan failed. Please try again.");
-  } catch (e) {
-    console.error(e);
-    alert("Network error while scanning.");
-  } finally {
-    setIsScanning(false);
   }
-}
-
 
   async function changeCurrency(newCcy) {
     await fetch("/api/settings", {

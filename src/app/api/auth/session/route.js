@@ -1,16 +1,21 @@
-// src/app/api/auth/session/route.js
-
 import { NextResponse } from "next/server";
+import jwt from "jsonwebtoken";
+import { prisma } from "@/lib/db"; // adjust path if needed
 
 export async function POST(req) {
   const token = req.headers.get("Authorization")?.replace("Bearer ", "");
+  if (!token) return NextResponse.json({ ok: false, error: "Missing token" }, { status: 400 });
 
-  if (!token) {
-    console.warn("⚠️ No session token received");
-    return NextResponse.json({ ok: false, error: "Missing token" }, { status: 400 });
-  }
+  const decoded = jwt.decode(token);
+  const shop = decoded?.dest?.replace(/^https?:\/\//, "");
 
-  console.log("✅ Session token received:", token);
+  if (!shop) return NextResponse.json({ ok: false, error: "Invalid token" }, { status: 400 });
 
-  return NextResponse.json({ ok: true });
+  await prisma.store.upsert({
+    where: { shop },
+    update: { accessToken: token },
+    create: { shop, accessToken: token },
+  });
+
+  return NextResponse.json({ ok: true, shop });
 }
