@@ -5,6 +5,8 @@ import { fetcher } from "@/lib/fetcher"; // keep only this import
 import createApp from "@shopify/app-bridge"; // (added earlier)
 import { getSessionToken as fetchSessionToken } from "@/utils/getSessionToken"; // ✅ ADDED
 import { useState, useMemo, useEffect, useRef, Suspense } from "react";
+import { Redirect } from "@shopify/app-bridge/actions";
+
 
 function Banner({ tone = "info", title, body, children }) {
   const styles =
@@ -258,21 +260,29 @@ if (res.status === 403 && json.error === "scan_limit_reached") {
     await Promise.all([mutateSettings(), mutateKpis()]);
   }
 
-  async function upgradeTo(planName) {
-    try {
-      const res = await fetch("/api/shopify/billing/upgrade", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ plan: planName }),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok || !json?.confirmationUrl) throw new Error(json?.error || "Upgrade failed");
-      window.location.href = json.confirmationUrl;
-    } catch (e) {
-      console.warn(e);
-      alert("Could not open the Shopify upgrade page.");
-    }
+
+
+async function upgradeTo(planName) {
+  try {
+    const res = await fetch("/api/shopify/billing/upgrade", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ plan: planName }),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok || !json?.confirmationUrl) throw new Error(json?.error || "Upgrade failed");
+
+    const app = appRef.current;
+    if (!app) throw new Error("App Bridge not initialized");
+
+    const redirect = Redirect.create(app);
+    redirect.dispatch(Redirect.Action.ADMIN_PATH, json.confirmationUrl.replace("https://admin.shopify.com", ""));
+  } catch (e) {
+    console.warn(e);
+    alert("Could not open the Shopify upgrade page.");
   }
+}
+
 
   // Banners
   const showRunScanBanner = hasStore && !isScanning && !hasScanned;
