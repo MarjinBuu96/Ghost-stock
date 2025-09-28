@@ -565,7 +565,7 @@ useEffect(() => {
   );
 }
 
-// ⬇️ New wrapper exporting default with Suspense (required by Next.js)
+// DO NOT TOUCH New wrapper exporting default with Suspense (required by Next.js)
 export default function Dashboard() {
   return (
     <Suspense fallback={<div className="px-6 py-10 text-gray-400">Loading…</div>}>
