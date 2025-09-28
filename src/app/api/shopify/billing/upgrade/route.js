@@ -3,6 +3,7 @@ export const runtime = "nodejs";
 import { NextResponse } from "next/server";
 import { cookies, headers as nextHeaders } from "next/headers";
 import { prisma } from "@/lib/prisma";
+import { getActiveSubscriptions } from "@/lib/shopifyBilling";
 
 const API_VERSION = "2025-07";
 
@@ -65,16 +66,39 @@ export async function POST(req) {
     const host = new URL(req.url).searchParams.get("host");
     const returnUrl = `${origin}/settings?shop=${encodeURIComponent(shop)}&host=${encodeURIComponent(host)}&upgraded=1`;
 
-    // ✅ Handle starter downgrade directly
+    // ✅ Handle starter downgrade + cancel billing
     if (String(plan).toLowerCase() === "starter") {
       try {
+        const activeSubs = await getActiveSubscriptions(shop, store.accessToken);
+        for (const sub of activeSubs) {
+          const cancelMutation = `
+            mutation CancelSubscription($id: ID!) {
+              appSubscriptionCancel(id: $id) {
+                appSubscription { id status }
+                userErrors { field message }
+              }
+            }
+          `;
+          const cancelVars = { id: sub.id };
+          const cancelResp = await fetch(`https://${shop}/admin/api/${API_VERSION}/graphql.json`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Shopify-Access-Token": store.accessToken,
+            },
+            body: JSON.stringify({ query: cancelMutation, variables: cancelVars }),
+          });
+          const cancelJson = await cancelResp.json();
+          console.log("🧹 Cancel result:", cancelJson);
+        }
+
         await prisma.userSettings.update({
           where: { userEmail: store.userEmail },
           data: { plan: "starter" },
         });
-        console.log("✅ Downgraded to starter");
+        console.log("✅ Downgraded to starter and cancelled billing");
       } catch (err) {
-        console.warn("⚠️ Starter downgrade failed, trying create:", err);
+        console.warn("⚠️ Starter downgrade failed:", err);
         await prisma.userSettings.create({
           data: {
             userEmail: store.userEmail,
