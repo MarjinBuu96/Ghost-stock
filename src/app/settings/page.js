@@ -103,25 +103,31 @@ export default function SettingsPage() {
   }
 
   // ---- Shopify Billing actions ----
-  async function goShopifyUpgrade(plan) {
-    try {
-      setBillingBusy(true);
-      // Implemented by your /api/shopify/billing/upgrade route
-      const res = await fetch("/api/shopify/billing/upgrade", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ plan }), // "starter" | "pro" | "enterprise"
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok || !json?.confirmationUrl) throw new Error(json?.error || "Upgrade failed");
-      // Redirect merchant to Shopify approval screen
-      window.open(json.confirmationUrl, "_blank", "noopener,noreferrer");
+async function goShopifyUpgrade(plan) {
+  try {
+    setBillingBusy(true);
 
-    } catch {
-      notify("Could not start Shopify upgrade");
-      setBillingBusy(false);
-    }
+    // 👇 Grab host from the current URL
+    const host = new URLSearchParams(window.location.search).get("host");
+
+    // 👇 Pass host to your backend route
+    const res = await fetch(`/api/shopify/billing/upgrade?host=${host}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ plan }), // "starter" | "pro" | "enterprise"
+    });
+
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok || !json?.confirmationUrl) throw new Error(json?.error || "Upgrade failed");
+
+    // ✅ Open billing confirmation in a new tab (not iframe)
+    window.open(json.confirmationUrl, "_blank", "noopener,noreferrer");
+  } catch {
+    notify("Could not start Shopify upgrade");
+    setBillingBusy(false);
   }
+}
+
 
   async function goShopifyManage() {
     try {

@@ -60,7 +60,9 @@ export async function POST(req) {
     if (!pricing) return NextResponse.json({ error: "unknown_plan" }, { status: 400 });
 
     const origin   = new URL(req.url).origin;
-    const returnUrl = `${origin}/settings?shop=${encodeURIComponent(shop)}`;
+    const host = new URL(req.url).searchParams.get("host"); // 👈 Extract host from query
+    const returnUrl = `${origin}/settings?shop=${encodeURIComponent(shop)}&host=${encodeURIComponent(host)}`;
+
     const testFlag = String(process.env.SHOPIFY_BILLING_TEST || "").toLowerCase() === "true";
 
     const mutation = `
