@@ -115,7 +115,8 @@ export default function SettingsPage() {
       const json = await res.json().catch(() => ({}));
       if (!res.ok || !json?.confirmationUrl) throw new Error(json?.error || "Upgrade failed");
       // Redirect merchant to Shopify approval screen
-      window.location.href = json.confirmationUrl;
+      window.open(json.confirmationUrl, "_blank", "noopener,noreferrer");
+
     } catch {
       notify("Could not start Shopify upgrade");
       setBillingBusy(false);
