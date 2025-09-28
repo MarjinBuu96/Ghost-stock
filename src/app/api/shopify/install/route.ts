@@ -1,44 +1,45 @@
+// src/app/api/shopify/install/route.ts
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 import { randomUUID } from "crypto";
 import { NextResponse } from "next/server";
-import { cookies, headers as nextHeaders } from "next/headers";
 import { prisma } from "@/lib/prisma";
 
 const STATE_COOKIE = "shopify_oauth_state";
-const SHOP_COOKIE = "shopify_shop";
+const SHOP_COOKIE  = "shopify_shop";
 
-/** Resolve a valid *.myshopify.com shop from query, cookie, or embedded header */
-async function resolveShop(url: URL): Promise<string | null> {
-  let shop = (url.searchParams.get("shop") || "").toLowerCase();
-
-  const looksBad = !shop.endsWith(".myshopify.com") || shop === "admin.shopify.com";
-  if (looksBad) {
-    // In Next 15 these are async
-    const cVal = (await cookies()).get(SHOP_COOKIE)?.value?.toLowerCase();
-    const hVal = (await nextHeaders()).get("x-shopify-shop-domain")?.toLowerCase();
-
-    if (cVal?.endsWith(".myshopify.com")) shop = cVal;
-    else if (hVal?.endsWith(".myshopify.com")) shop = hVal;
+function shopFromHostParam(hostB64?: string | null): string | null {
+  if (!hostB64) return null;
+  try {
+    const decoded = Buffer.from(hostB64, "base64").toString("utf8");
+    // decoded like: "admin.shopify.com/store/ghost-app" or ".../stores/ghost-app"
+    const m = decoded.match(/\/store[s]?\/([^/?#]+)/i);
+    if (!m) return null;
+    const shopPrefix = m[1]; // "ghost-app"
+    return `${shopPrefix}.myshopify.com`.toLowerCase();
+  } catch {
+    return null;
   }
-
-  return shop && shop.endsWith(".myshopify.com") ? shop : null;
 }
 
 export async function GET(req: Request) {
-  const url = new URL(req.url);
-  const shop = await resolveShop(url);
+  const url  = new URL(req.url);
+  let shop = (url.searchParams.get("shop") || "").toLowerCase();
 
-  if (!shop) {
-    return NextResponse.json({ error: "missing_or_invalid_shop" }, { status: 400 });
+  // If embedded passed admin.shopify.com (or empty), recover shop from host=...
+  if (!shop.endsWith(".myshopify.com")) {
+    const fromHost = shopFromHostParam(url.searchParams.get("host"));
+    if (!fromHost) {
+      return NextResponse.json({ error: "missing_or_invalid_shop" }, { status: 400 });
+    }
+    shop = fromHost;
   }
 
-  // Bounce out of iframe once; carry corrected shop forward
+  // One-time bounce out of iframe so OAuth can complete in top-level
   if (url.searchParams.get("tld") !== "1") {
     const top = new URL(req.url);
     top.searchParams.set("tld", "1");
-    top.searchParams.set("shop", shop);
     return new Response(
       `<!doctype html><script>
         var r=${JSON.stringify(top.toString())};
@@ -48,13 +49,16 @@ export async function GET(req: Request) {
     );
   }
 
-  const clientId = process.env.SHOPIFY_API_KEY;
-  const scopes = process.env.SHOPIFY_SCOPES || "";
-  const redirectUri = process.env.SHOPIFY_APP_URL; // should be your callback URL
+  const clientId    = process.env.SHOPIFY_API_KEY;
+  const scopes      = process.env.SHOPIFY_SCOPES || "";        // e.g. "read_products,read_orders"
+  const redirectUri = process.env.SHOPIFY_APP_URL;             // MUST be your callback route URL
 
   if (!clientId || !redirectUri) {
     return NextResponse.json(
-      { error: "missing_env_vars", details: { SHOPIFY_API_KEY: !!clientId, SHOPIFY_APP_URL: !!redirectUri } },
+      {
+        error: "missing_env_vars",
+        details: { SHOPIFY_API_KEY: !!clientId, SHOPIFY_APP_URL: !!redirectUri },
+      },
       { status: 500 }
     );
   }
@@ -68,25 +72,25 @@ export async function GET(req: Request) {
     auth.searchParams.set("scope", scopes);
     auth.searchParams.set("redirect_uri", redirectUri);
     auth.searchParams.set("state", state);
-    auth.searchParams.set("grant_options[]", "per-user"); // online token
+    // keep online token (per-user) or remove if you want offline tokens instead
+    auth.searchParams.set("grant_options[]", "per-user");
 
     const res = NextResponse.redirect(auth.toString());
     res.headers.set("Cache-Control", "no-store");
 
     res.cookies.set(STATE_COOKIE, state, {
       httpOnly: true,
-      secure: true,
+      secure:   true,
       sameSite: "none",
-      path: "/",
-      maxAge: 10 * 60,
+      path:     "/",
+      maxAge:   10 * 60,
     });
 
-    // refresh/ensure the correct shop is stored client-side
     res.cookies.set(SHOP_COOKIE, shop, {
-      secure: true,
+      secure:   true,
       sameSite: "none",
-      path: "/",
-      maxAge: 365 * 24 * 60 * 60,
+      path:     "/",
+      maxAge:   365 * 24 * 60 * 60,
     });
 
     return res;
