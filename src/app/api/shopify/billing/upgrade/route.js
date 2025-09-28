@@ -88,6 +88,8 @@ export async function POST(req) {
       }],
     };
 
+    console.log("📤 Sending to Shopify:", JSON.stringify({ query: mutation, variables }, null, 2)); // ✅ Patch A
+
     const resp = await fetch(`https://${shop}/admin/api/${API_VERSION}/graphql.json`, {
       method: "POST",
       headers: {
@@ -98,12 +100,14 @@ export async function POST(req) {
     });
 
     const text = await resp.text();
-    console.log("📦 Raw Shopify billing response:", text); // ✅ Patch 1: log raw response
+    console.log("📦 Raw Shopify billing response:", text); // ✅ Patch 1
 
     let json;
     try { json = JSON.parse(text); } catch { json = { raw: text }; }
 
     if (!resp.ok) {
+      console.error("❌ Shopify HTTP error:", resp.status); // ✅ Patch B
+      console.error("🧾 Parsed response:", json);            // ✅ Patch B
       return NextResponse.json(
         { error: "shopify_graphql_http", status: resp.status, payload: json },
         { status: 502 }
@@ -112,7 +116,7 @@ export async function POST(req) {
 
     const result = json?.data?.appSubscriptionCreate;
     if (!result) {
-      console.error("❌ Missing appSubscriptionCreate:", json); // ✅ Patch 2: guard missing mutation
+      console.error("❌ Missing appSubscriptionCreate:", json); // ✅ Patch 2
       return NextResponse.json({ error: "missing_subscription_create", payload: json }, { status: 502 });
     }
 
@@ -122,7 +126,7 @@ export async function POST(req) {
     }
 
     const confirmationUrl = result?.confirmationUrl;
-    console.log("✅ Confirmation URL:", confirmationUrl); // ✅ Patch 3: log confirmation URL
+    console.log("✅ Confirmation URL:", confirmationUrl); // ✅ Patch 3
 
     if (!confirmationUrl) {
       return NextResponse.json({ error: "no_confirmation_url", payload: json }, { status: 500 });
