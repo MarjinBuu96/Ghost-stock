@@ -14,7 +14,6 @@ function makeUniqueHash(a) {
 
 export async function POST() {
   try {
-    // ---- (NEW) Safe, optional session lookup via dynamic import ----
     let session = null;
     try {
       const [{ getServerSession }, { authOptions }] = await Promise.all([
@@ -23,10 +22,8 @@ export async function POST() {
       ]);
       session = await getServerSession(authOptions);
     } catch (e) {
-      // If next-auth fails to load (or isn’t configured in this env), don’t crash the route
       console.warn("Optional next-auth session failed:", e?.message || e);
     }
-    // ---------------------------------------------------------------
 
     const shopCookie = cookies().get("shopify_shop")?.value || "";
 
@@ -34,7 +31,6 @@ export async function POST() {
       return NextResponse.json({ error: "shopify_env_missing" }, { status: 500 });
     }
 
-    // Resolve store by session email first, then by cookie
     let store = null;
     try {
       if (session?.user?.email) {
@@ -55,7 +51,43 @@ export async function POST() {
       return NextResponse.json({ error: "store_incomplete" }, { status: 400 });
     }
 
-    // Shopify data
+    // 🔒 Enforce scan limit for Starter plan
+    try {
+      const settings = await prisma.userSettings.findUnique({
+        where: { userEmail: store.userEmail },
+      });
+
+      if (settings?.plan === "starter") {
+        const now = new Date();
+        const resetThreshold = new Date(settings.lastScanReset);
+        resetThreshold.setDate(resetThreshold.getDate() + 7);
+
+        if (now > resetThreshold) {
+          await prisma.userSettings.update({
+            where: { userEmail: store.userEmail },
+            data: {
+              scanCount: 1,
+              lastScanReset: now,
+            },
+          });
+          console.log("🔄 Scan count reset and incremented");
+        } else if (settings.scanCount >= 3) {
+          console.log("⛔️ Scan limit reached for Starter plan");
+          return NextResponse.json({ error: "scan_limit_reached" }, { status: 403 });
+        } else {
+          await prisma.userSettings.update({
+            where: { userEmail: store.userEmail },
+            data: {
+              scanCount: { increment: 1 },
+            },
+          });
+          console.log("📈 Scan count incremented");
+        }
+      }
+    } catch (e) {
+      console.warn("⚠️ Scan limit logic failed:", e?.message || e);
+    }
+
     let inventory = [];
     try {
       inventory = await getInventoryByVariant(store.shop, store.accessToken);
@@ -76,7 +108,7 @@ export async function POST() {
       const msg = (e?.message || "").toLowerCase();
       const scopeIssue = msg.includes("401") || msg.includes("403");
       if (scopeIssue) {
-        salesMap = {}; // proceed without velocity if scope missing
+        salesMap = {};
       } else {
         console.error("Orders fetch failed:", e);
         return NextResponse.json(
@@ -86,7 +118,6 @@ export async function POST() {
       }
     }
 
-    // Compute alerts
     let alerts = [];
     try {
       alerts = computeAlerts(inventory, salesMap) || [];
@@ -99,7 +130,6 @@ export async function POST() {
       );
     }
 
-    // Persist alerts
     if (alerts.length > 0) {
       try {
         await prisma.$transaction(
@@ -139,7 +169,6 @@ export async function POST() {
       }
     }
 
-    // Update last scanned (don’t fail request if this write errors)
     try {
       await prisma.store.update({
         where: { id: store.id },

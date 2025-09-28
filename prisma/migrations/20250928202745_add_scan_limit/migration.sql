@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE "public"."UserSettings" ADD COLUMN     "lastScanReset" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ADD COLUMN     "scanCount" INTEGER NOT NULL DEFAULT 0;
