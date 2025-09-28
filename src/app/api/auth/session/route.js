@@ -1,21 +1,33 @@
 import { NextResponse } from "next/server";
 import jwt from "jsonwebtoken";
-import { prisma } from "@/lib/db"; // adjust path if needed
+import { prisma } from "@/lib/db";
 
 export async function POST(req) {
-  const token = req.headers.get("Authorization")?.replace("Bearer ", "");
-  if (!token) return NextResponse.json({ ok: false, error: "Missing token" }, { status: 400 });
+  try {
+    const token = req.headers.get("Authorization")?.replace("Bearer ", "");
+    if (!token) {
+      return NextResponse.json({ ok: false, error: "Missing token" }, { status: 400 });
+    }
 
-  const decoded = jwt.decode(token);
-  const shop = decoded?.dest?.replace(/^https?:\/\//, "");
+    const decoded = jwt.decode(token);
+    if (!decoded?.dest) {
+      return NextResponse.json({ ok: false, error: "Missing dest in token" }, { status: 400 });
+    }
 
-  if (!shop) return NextResponse.json({ ok: false, error: "Invalid token" }, { status: 400 });
+    const shop = decoded.dest.replace(/^https?:\/\//, "");
+    if (!shop) {
+      return NextResponse.json({ ok: false, error: "Invalid shop domain" }, { status: 400 });
+    }
 
-  await prisma.store.upsert({
-    where: { shop },
-    update: { accessToken: token },
-    create: { shop, accessToken: token },
-  });
+    await prisma.store.upsert({
+      where: { shop },
+      update: { accessToken: token },
+      create: { shop, accessToken: token },
+    });
 
-  return NextResponse.json({ ok: true, shop });
+    return NextResponse.json({ ok: true, shop });
+  } catch (err) {
+    console.error("Session route error:", err);
+    return NextResponse.json({ ok: false, error: "Server error" }, { status: 500 });
+  }
 }
