@@ -12,7 +12,9 @@ function shopFromHostParam(hostB64) {
     const decoded = Buffer.from(hostB64, "base64").toString("utf8");
     const m = decoded.match(/\/store[s]?\/([^/?#]+)/i);
     return m ? `${m[1]}.myshopify.com`.toLowerCase() : null;
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 
 function getShopFromRequest(req) {
@@ -36,9 +38,12 @@ function getShopFromRequest(req) {
 
 function planToPricing(plan) {
   switch (String(plan || "").toLowerCase()) {
-    case "pro":        return { name: "Ghost Stock Pro",        amount: 29.0,  currencyCode: "USD" };
-    case "enterprise": return { name: "Ghost Stock Enterprise", amount: 199.0, currencyCode: "USD" };
-    default: return null;
+    case "pro":
+      return { name: "Ghost Stock Pro", amount: 29.0, currencyCode: "USD" };
+    case "enterprise":
+      return { name: "Ghost Stock Enterprise", amount: 199.0, currencyCode: "USD" };
+    default:
+      return null;
   }
 }
 
@@ -52,16 +57,40 @@ export async function POST(req) {
     if (!shop) return NextResponse.json({ error: "no_shop_in_request" }, { status: 400 });
 
     const store = await prisma.store.findUnique({ where: { shop } });
-    if (!store?.accessToken) {
+    if (!store?.accessToken || !store?.userEmail) {
       return NextResponse.json({ error: "no_store_or_token", shop }, { status: 400 });
     }
 
+    const origin = new URL(req.url).origin;
+    const host = new URL(req.url).searchParams.get("host");
+    const returnUrl = `${origin}/settings?shop=${encodeURIComponent(shop)}&host=${encodeURIComponent(host)}&upgraded=1`;
+
+    // ✅ Handle starter downgrade directly
+    if (String(plan).toLowerCase() === "starter") {
+      try {
+        await prisma.userSettings.update({
+          where: { userEmail: store.userEmail },
+          data: { plan: "starter" },
+        });
+        console.log("✅ Downgraded to starter");
+      } catch (err) {
+        console.warn("⚠️ Starter downgrade failed, trying create:", err);
+        await prisma.userSettings.create({
+          data: {
+            userEmail: store.userEmail,
+            currency: store.currency || "USD",
+            plan: "starter",
+          },
+        });
+        console.log("✅ Starter plan created");
+      }
+
+      return NextResponse.json({ confirmationUrl: returnUrl });
+    }
+
+    // ✅ Proceed with Shopify billing for paid plans
     const pricing = planToPricing(plan);
     if (!pricing) return NextResponse.json({ error: "unknown_plan" }, { status: 400 });
-
-    const origin   = new URL(req.url).origin;
-    const host = new URL(req.url).searchParams.get("host"); // 👈 Extract host from query
-    const returnUrl = `${origin}/settings?shop=${encodeURIComponent(shop)}&host=${encodeURIComponent(host)}`;
 
     const testFlag = String(process.env.SHOPIFY_BILLING_TEST || "").toLowerCase() === "true";
 
@@ -90,7 +119,7 @@ export async function POST(req) {
       }],
     };
 
-    console.log("📤 Sending to Shopify:", JSON.stringify({ query: mutation, variables }, null, 2)); // ✅ Patch A
+    console.log("📤 Sending to Shopify:", JSON.stringify({ query: mutation, variables }, null, 2));
 
     const resp = await fetch(`https://${shop}/admin/api/${API_VERSION}/graphql.json`, {
       method: "POST",
@@ -102,14 +131,18 @@ export async function POST(req) {
     });
 
     const text = await resp.text();
-    console.log("📦 Raw Shopify billing response:", text); // ✅ Patch 1
+    console.log("📦 Raw Shopify billing response:", text);
 
     let json;
-    try { json = JSON.parse(text); } catch { json = { raw: text }; }
+    try {
+      json = JSON.parse(text);
+    } catch {
+      json = { raw: text };
+    }
 
     if (!resp.ok) {
-      console.error("❌ Shopify HTTP error:", resp.status); // ✅ Patch B
-      console.error("🧾 Parsed response:", json);            // ✅ Patch B
+      console.error("❌ Shopify HTTP error:", resp.status);
+      console.error("🧾 Parsed response:", json);
       return NextResponse.json(
         { error: "shopify_graphql_http", status: resp.status, payload: json },
         { status: 502 }
@@ -118,7 +151,7 @@ export async function POST(req) {
 
     const result = json?.data?.appSubscriptionCreate;
     if (!result) {
-      console.error("❌ Missing appSubscriptionCreate:", json); // ✅ Patch 2
+      console.error("❌ Missing appSubscriptionCreate:", json);
       return NextResponse.json({ error: "missing_subscription_create", payload: json }, { status: 502 });
     }
 
@@ -128,7 +161,7 @@ export async function POST(req) {
     }
 
     const confirmationUrl = result?.confirmationUrl;
-    console.log("✅ Confirmation URL:", confirmationUrl); // ✅ Patch 3
+    console.log("✅ Confirmation URL:", confirmationUrl);
 
     if (!confirmationUrl) {
       return NextResponse.json({ error: "no_confirmation_url", payload: json }, { status: 500 });
@@ -136,7 +169,7 @@ export async function POST(req) {
 
     return NextResponse.json({ confirmationUrl });
   } catch (err) {
-    console.error("billing/upgrade crash:", err);
+    console.error("🔥 billing/upgrade crash:", err);
     return NextResponse.json({ error: "server_error", message: err?.message || String(err) }, { status: 500 });
   }
 }
