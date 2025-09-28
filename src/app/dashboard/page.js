@@ -35,7 +35,7 @@ function Banner({ tone = "info", title, body, children }) {
 
 
 function DashboardInner() {
-  const appRef = useRef(null);
+  const appRef = useRef(null); // ✅ Declare App Bridge ref
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -52,8 +52,9 @@ function DashboardInner() {
       forceRedirect: true,
     });
 
-    appRef.current = app;
+    appRef.current = app; // ✅ Store App Bridge instance
 
+    // Session token exchange
     fetchSessionToken(app).then((token) => {
       fetch("/api/auth/session", {
         method: "POST",
@@ -63,6 +64,7 @@ function DashboardInner() {
       });
     });
 
+    // Patch fetch to auto-attach token
     const originalFetch = window.fetch.bind(window);
     window.fetch = async (input, init = {}) => {
       try {
@@ -82,18 +84,30 @@ function DashboardInner() {
     };
   }, []);
 
+  // ✅ Now you can use appRef.current inside scan()
+  // const app = appRef.current;
+  // const token = await fetchSessionToken(app);
+
+  return (
+    <div>
+      {/* Your dashboard JSX here */}
+    </div>
+  );
+}
+
+// Alerts
   const { data, error, isLoading, mutate } = useSWR("/api/alerts", fetcher, { refreshInterval: 0 });
   const [filter, setFilter] = useState("all");
   const [isScanning, setIsScanning] = useState(false);
   const [countingIds, setCountingIds] = useState(() => new Set());
-  const [hasScanned, setHasScanned] = useState(false);
 
+  // Track “first scan done”
+  const [hasScanned, setHasScanned] = useState(false);
   useEffect(() => {
     try {
       if (localStorage.getItem("hasScanned") === "1") setHasScanned(true);
     } catch {}
   }, []);
-
   useEffect(() => {
     if ((data?.alerts?.length ?? 0) > 0 && !hasScanned) {
       setHasScanned(true);
@@ -103,20 +117,22 @@ function DashboardInner() {
     }
   }, [data?.alerts?.length, hasScanned]);
 
+  // Connected stores
   const { data: storesData } = useSWR("/api/me/stores", fetcher);
   const stores = storesData?.stores ?? [];
   const hasStore = stores.length > 0;
 
+  // Inventory snapshot
   const {
     data: invData,
     error: invErr,
     isLoading: invLoading,
     mutate: invMutate,
   } = useSWR("/api/debug/inventory", fetcher, { refreshInterval: 0 });
-
   const invRows = invData?.items ?? [];
   const invCount = invData?.count ?? 0;
 
+  // KPIs — poll every 15s
   const {
     data: kpis,
     isLoading: kpisLoading,
@@ -127,6 +143,7 @@ function DashboardInner() {
     dedupingInterval: 5000,
   });
 
+  // User settings
   const { data: settingsData, mutate: mutateSettings } = useSWR("/api/settings", fetcher, { refreshInterval: 0 });
   const currency = settingsData?.settings?.currency ?? "USD";
   const plan = String(settingsData?.settings?.plan || "starter").toLowerCase();
@@ -189,54 +206,56 @@ function DashboardInner() {
     }
   }
 
-  async function scan() {
-    try {
-      setIsScanning(true);
+async function scan() {
+  try {
+    setIsScanning(true);
 
-      const app = appRef.current;
-      if (!app) {
-        alert("App Bridge not initialized.");
-        return;
-      }
-
-      const token = await fetchSessionToken(app);
-
-      const res = await fetch("/api/shopify/scan", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
-
-      if (res.ok) {
-        setHasScanned(true);
-        try { localStorage.setItem("hasScanned", "1"); } catch {}
-        await Promise.all([mutate(), invMutate(), mutateKpis()]);
-        return;
-      }
-
-      let payload = {};
-      try { payload = await res.json(); } catch {}
-
-      if (res.status === 401) {
-        window.location.href = "/login?callbackUrl=/dashboard";
-        return;
-      }
-
-      if (payload?.error === "no_store") {
-        alert("No Shopify store connected yet. Head to Settings to connect your shop.");
-        window.location.href = "/settings";
-        return;
-      }
-
-      alert("Scan failed. Please try again.");
-    } catch (e) {
-      console.error(e);
-      alert("Network error while scanning.");
-    } finally {
-      setIsScanning(false);
+    const app = appRef.current;
+    if (!app) {
+      alert("App Bridge not initialized.");
+      return;
     }
+
+    const token = await fetchSessionToken(app);
+
+    const res = await fetch("/api/shopify/scan", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    if (res.ok) {
+      setHasScanned(true);
+      try { localStorage.setItem("hasScanned", "1"); } catch {}
+      await Promise.all([mutate(), invMutate(), mutateKpis()]);
+      return;
+    }
+
+    let payload = {};
+    try { payload = await res.json(); } catch {}
+
+    if (res.status === 401) {
+      window.location.href = "/login?callbackUrl=/dashboard";
+      return;
+    }
+
+    if (payload?.error === "no_store") {
+      alert("No Shopify store connected yet. Head to Settings to connect your shop.");
+      window.location.href = "/settings";
+      return;
+    }
+
+    alert("Scan failed. Please try again.");
+  } catch (e) {
+    console.error(e);
+    alert("Network error while scanning.");
+  } finally {
+    setIsScanning(false);
   }
+}
+
+
 
   async function changeCurrency(newCcy) {
     await fetch("/api/settings", {
@@ -262,14 +281,6 @@ function DashboardInner() {
       alert("Could not open the Shopify upgrade page.");
     }
   }
-
-  return (
-    <div>
-      {/* Your dashboard JSX here */}
-    </div>
-  );
-}
-
 
   // Banners
   const showRunScanBanner = hasStore && !isScanning && !hasScanned;
