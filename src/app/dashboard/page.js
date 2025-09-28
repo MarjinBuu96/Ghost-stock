@@ -193,39 +193,62 @@ useEffect(() => {
     }
   }
 
-  async function scan() {
-    try {
-      setIsScanning(true);
-      const res = await fetch("/api/shopify/scan", { method: "POST" });
-      if (res.ok) {
-        setHasScanned(true);
-        try {
-          localStorage.setItem("hasScanned", "1");
-        } catch {}
-        await Promise.all([mutate(), invMutate(), mutateKpis()]);
-        return;
-      }
-      let payload = {};
-      try {
-        payload = await res.json();
-      } catch {}
-      if (res.status === 401) {
-        window.location.href = "/login?callbackUrl=/dashboard";
-        return;
-      }
-      if (payload?.error === "no_store") {
-        alert("No Shopify store connected yet. Head to Settings to connect your shop.");
-        window.location.href = "/settings";
-        return;
-      }
-      alert("Scan failed. Please try again.");
-    } catch (e) {
-      console.error(e);
-      alert("Network error while scanning.");
-    } finally {
-      setIsScanning(false);
+async function scan() {
+  try {
+    setIsScanning(true);
+
+    // ✅ Get App Bridge instance
+    const params = new URLSearchParams(window.location.search);
+    const host = params.get("host");
+    const shopDomain = params.get("shop");
+
+    const app = createApp({
+      apiKey: "5860dca7a3c5d0818a384115d221179a",
+      ...(host ? { host } : { shopOrigin: shopDomain }),
+      forceRedirect: true,
+    });
+
+    // ✅ Fetch session token
+    const token = await fetchSessionToken(app);
+
+    // ✅ Send scan request with token
+    const res = await fetch("/api/shopify/scan", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    if (res.ok) {
+      setHasScanned(true);
+      try { localStorage.setItem("hasScanned", "1"); } catch {}
+      await Promise.all([mutate(), invMutate(), mutateKpis()]);
+      return;
     }
+
+    let payload = {};
+    try { payload = await res.json(); } catch {}
+
+    if (res.status === 401) {
+      window.location.href = "/login?callbackUrl=/dashboard";
+      return;
+    }
+
+    if (payload?.error === "no_store") {
+      alert("No Shopify store connected yet. Head to Settings to connect your shop.");
+      window.location.href = "/settings";
+      return;
+    }
+
+    alert("Scan failed. Please try again.");
+  } catch (e) {
+    console.error(e);
+    alert("Network error while scanning.");
+  } finally {
+    setIsScanning(false);
   }
+}
+
 
   async function changeCurrency(newCcy) {
     await fetch("/api/settings", {
