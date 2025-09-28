@@ -57,7 +57,7 @@ export async function GET(req: Request) {
     auth.searchParams.set("scope", scopes);
     auth.searchParams.set("redirect_uri", redirectUri);
     auth.searchParams.set("state", state);
-    auth.searchParams.set("grant_options[]", "per-user");
+    
 
     const res = NextResponse.redirect(auth.toString());
     res.headers.set("Cache-Control", "no-store");
