@@ -8,10 +8,10 @@ import { verifyOAuthQueryHmac } from "@/lib/shopifyHmac";
 
 const STATE_MAX_AGE_MS = 15 * 60 * 1000;
 const STATE_COOKIE = "shopify_oauth_state";
-const SHOP_COOKIE  = "shopify_shop";
+const SHOP_COOKIE = "shopify_shop";
 const SHOPIFY_API_VERSION = "2025-07";
 
-async function ensureComplianceWebhooks(shop: string, accessToken: string, appOrigin: string) {
+async function ensureComplianceWebhooks(shop, accessToken, appOrigin) {
   const address = `${appOrigin}/api/shopify/webhooks`;
   const base = `https://${shop}/admin/api/${SHOPIFY_API_VERSION}/webhooks.json`;
   const headers = {
@@ -20,8 +20,8 @@ async function ensureComplianceWebhooks(shop: string, accessToken: string, appOr
   };
   const payloads = [
     { webhook: { topic: "customers/data_request", address, format: "json" } },
-    { webhook: { topic: "customers/redact",       address, format: "json" } },
-    { webhook: { topic: "shop/redact",            address, format: "json" } },
+    { webhook: { topic: "customers/redact", address, format: "json" } },
+    { webhook: { topic: "shop/redact", address, format: "json" } },
   ];
   for (const body of payloads) {
     try {
@@ -32,7 +32,7 @@ async function ensureComplianceWebhooks(shop: string, accessToken: string, appOr
   }
 }
 
-export async function GET(req: Request) {
+export async function GET(req) {
   const url = new URL(req.url);
   const shop = (url.searchParams.get("shop") || "").toLowerCase();
   const state = url.searchParams.get("state") || "";
@@ -46,7 +46,13 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "bad_hmac" }, { status: 401 });
   }
 
-  const rec = await prisma.oAuthState.findUnique({ where: { state } }).catch(() => null);
+  let rec = null;
+  try {
+    rec = await prisma.oAuthState.findUnique({ where: { state } });
+  } catch (err) {
+    console.warn("⚠️ Failed to fetch OAuth state:", err);
+  }
+
   const recOk = !!rec && rec.shop === shop &&
     Date.now() - rec.createdAt.getTime() <= STATE_MAX_AGE_MS;
 
@@ -58,7 +64,11 @@ export async function GET(req: Request) {
   }
 
   if (recOk) {
-    await prisma.oAuthState.delete({ where: { state } }).catch(() => {});
+    try {
+      await prisma.oAuthState.delete({ where: { state } });
+    } catch (err) {
+      console.warn("⚠️ Failed to delete OAuth state:", err);
+    }
   }
 
   const code = url.searchParams.get("code") || "";
@@ -74,7 +84,11 @@ export async function GET(req: Request) {
     }),
   });
 
-  const payload = await r.json().catch(() => ({}));
+  let payload = {};
+  try {
+    payload = await r.json();
+  } catch {}
+
   if (!r.ok || !payload?.access_token) {
     console.error("❌ Token exchange failed:", payload);
     return NextResponse.json({ error: "token_exchange_failed" }, { status: 400 });
@@ -82,20 +96,22 @@ export async function GET(req: Request) {
 
   const accessToken = payload.access_token;
 
-  // ✅ This is the real Shopify token—not a JWT
-  await prisma.store.upsert({
-    where: { shop },
-    update: {
-      accessToken,
-      updatedAt: new Date(),
-    },
-    create: {
-      shop,
-      accessToken,
-      userEmail: shop,
-      createdAt: new Date(),
-    },
-  });
+  try {
+    await prisma.store.upsert({
+      where: { shop },
+      update: { accessToken, updatedAt: new Date() },
+      create: {
+        shop,
+        accessToken,
+        userEmail: shop,
+        createdAt: new Date(),
+      },
+    });
+    console.log("✅ Store upserted:", shop);
+  } catch (err) {
+    console.error("❌ Failed to upsert store:", err);
+    return NextResponse.json({ error: "store_upsert_failed" }, { status: 500 });
+  }
 
   await ensureComplianceWebhooks(shop, accessToken, url.origin);
 
