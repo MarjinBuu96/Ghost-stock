@@ -32,20 +32,20 @@ model Alert {
   @@index([userEmail, status])
   @@index([storeId, status])
 }
-
 model UserSettings {
   id                String   @id @default(cuid())
   userEmail         String   @unique
   currency          String   @default("USD")
   plan              String   @default("starter") // free | starter | pro | enterprise
-  stripeCustomerId  String?  // safe to keep optional even if unused now
+  stripeCustomerId  String?
   slackWebhookUrl   String?
   notificationEmail String?
+  scanCount         Int      @default(0)         // ✅ NEW
+  lastScanReset     DateTime @default(now())     // ✅ NEW
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
-  scanCount      Int      @default(0)
-  lastScanReset  DateTime @default(now())
 }
+
 
 model Organization {
   id            String        @id @default(cuid())
