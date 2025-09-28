@@ -6,15 +6,23 @@ import { getActiveStore } from "@/lib/getActiveStore";
 
 export async function GET(req) {
   try {
-    const store = await getActiveStore(req);
-    console.log("🔍 Store from getActiveStore:", store);
+    const url = new URL(req.url);
+    const shopParam = url.searchParams.get("shop");
+    const store = (await getActiveStore(req)) || (shopParam
+      ? await prisma.store.findUnique({ where: { shop: shopParam } })
+      : null);
+
+    console.log("🔍 Confirm route store:", store);
 
     if (!store || !store.userEmail) {
       console.error("❌ Missing store or userEmail:", store);
       return NextResponse.redirect(new URL("/settings?billing=unauthorized", req.url));
     }
 
-    const url = new URL(req.url);
+
+
+
+    
     const hinted = (url.searchParams.get("plan") || "").toLowerCase();
 
     const query = `
