@@ -1,10 +1,11 @@
 "use client";
 
 import useSWR from "swr";
-import { useState, useMemo, useEffect, Suspense } from "react";
 import { fetcher } from "@/lib/fetcher"; // keep only this import
 import createApp from "@shopify/app-bridge"; // (added earlier)
 import { getSessionToken as fetchSessionToken } from "@/utils/getSessionToken"; // ✅ ADDED
+import { useState, useMemo, useEffect, useRef, Suspense } from "react";
+
 
 
 function Banner({ tone = "info", title, body, children }) {
@@ -30,71 +31,69 @@ function Banner({ tone = "info", title, body, children }) {
 }
 
 // ⬇️ Your original component, unchanged, just renamed
+
+
+
 function DashboardInner() {
-  // Shopify App Bridge init (already added)
-// Shopify App Bridge init (patched to prefer `host`, fallback to `shopOrigin`)
-useEffect(() => {
-  if (typeof window === "undefined") return;
+  const appRef = useRef(null);
 
-  const params = new URLSearchParams(window.location.search);
-  const host = params.get("host");
-  const shopDomain = params.get("shop");
+  useEffect(() => {
+    if (typeof window === "undefined") return;
 
-  if (!host && !shopDomain) return;
+    const params = new URLSearchParams(window.location.search);
+    const host = params.get("host");
+    const shopDomain = params.get("shop");
 
-  const app = createApp({
-    apiKey: "5860dca7a3c5d0818a384115d221179a",
-    ...(host ? { host } : { shopOrigin: shopDomain }),
-    forceRedirect: true,
-  });
+    if (!host && !shopDomain) return;
 
-  // ✅ One-time session token exchange for Shopify compliance
-  fetchSessionToken(app).then((token) => {
-    fetch("/api/auth/session", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
+    const app = createApp({
+      apiKey: "5860dca7a3c5d0818a384115d221179a",
+      ...(host ? { host } : { shopOrigin: shopDomain }),
+      forceRedirect: true,
     });
-  });
 
-  // ✅ Attach session tokens to same-origin /api/* calls
-  const originalFetch = window.fetch.bind(window);
-  window.fetch = async (input, init = {}) => {
-    try {
-      const url = typeof input === "string" ? input : input?.url || "";
-      if (url.startsWith("/api")) {
-        const token = await fetchSessionToken(app);
-        const headers = new Headers(init.headers || {});
-        headers.set("Authorization", `Bearer ${token}`);
-        return originalFetch(input, { ...init, headers });
-      }
-    } catch (_) {
-      // fall through
-    }
-    return originalFetch(input, init);
-  };
+    appRef.current = app;
 
-  return () => {
-    window.fetch = originalFetch;
-  };
-}, []);
+    fetchSessionToken(app).then((token) => {
+      fetch("/api/auth/session", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+    });
 
+    const originalFetch = window.fetch.bind(window);
+    window.fetch = async (input, init = {}) => {
+      try {
+        const url = typeof input === "string" ? input : input?.url || "";
+        if (url.startsWith("/api")) {
+          const token = await fetchSessionToken(app);
+          const headers = new Headers(init.headers || {});
+          headers.set("Authorization", `Bearer ${token}`);
+          return originalFetch(input, { ...init, headers });
+        }
+      } catch (_) {}
+      return originalFetch(input, init);
+    };
 
+    return () => {
+      window.fetch = originalFetch;
+    };
+  }, []);
 
-  // Alerts
   const { data, error, isLoading, mutate } = useSWR("/api/alerts", fetcher, { refreshInterval: 0 });
   const [filter, setFilter] = useState("all");
   const [isScanning, setIsScanning] = useState(false);
   const [countingIds, setCountingIds] = useState(() => new Set());
-
-  // Track “first scan done”
   const [hasScanned, setHasScanned] = useState(false);
+
   useEffect(() => {
     try {
       if (localStorage.getItem("hasScanned") === "1") setHasScanned(true);
     } catch {}
   }, []);
+
   useEffect(() => {
     if ((data?.alerts?.length ?? 0) > 0 && !hasScanned) {
       setHasScanned(true);
@@ -104,22 +103,20 @@ useEffect(() => {
     }
   }, [data?.alerts?.length, hasScanned]);
 
-  // Connected stores
   const { data: storesData } = useSWR("/api/me/stores", fetcher);
   const stores = storesData?.stores ?? [];
   const hasStore = stores.length > 0;
 
-  // Inventory snapshot
   const {
     data: invData,
     error: invErr,
     isLoading: invLoading,
     mutate: invMutate,
   } = useSWR("/api/debug/inventory", fetcher, { refreshInterval: 0 });
+
   const invRows = invData?.items ?? [];
   const invCount = invData?.count ?? 0;
 
-  // KPIs — poll every 15s
   const {
     data: kpis,
     isLoading: kpisLoading,
@@ -130,7 +127,6 @@ useEffect(() => {
     dedupingInterval: 5000,
   });
 
-  // User settings
   const { data: settingsData, mutate: mutateSettings } = useSWR("/api/settings", fetcher, { refreshInterval: 0 });
   const currency = settingsData?.settings?.currency ?? "USD";
   const plan = String(settingsData?.settings?.plan || "starter").toLowerCase();
@@ -193,62 +189,54 @@ useEffect(() => {
     }
   }
 
-async function scan() {
-  try {
-    setIsScanning(true);
+  async function scan() {
+    try {
+      setIsScanning(true);
 
-    // ✅ Get App Bridge instance
-    const params = new URLSearchParams(window.location.search);
-    const host = params.get("host");
-    const shopDomain = params.get("shop");
+      const app = appRef.current;
+      if (!app) {
+        alert("App Bridge not initialized.");
+        return;
+      }
 
-    const app = createApp({
-      apiKey: "5860dca7a3c5d0818a384115d221179a",
-      ...(host ? { host } : { shopOrigin: shopDomain }),
-      forceRedirect: true,
-    });
+      const token = await fetchSessionToken(app);
 
-    // ✅ Fetch session token
-    const token = await fetchSessionToken(app);
+      const res = await fetch("/api/shopify/scan", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
 
-    // ✅ Send scan request with token
-    const res = await fetch("/api/shopify/scan", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
+      if (res.ok) {
+        setHasScanned(true);
+        try { localStorage.setItem("hasScanned", "1"); } catch {}
+        await Promise.all([mutate(), invMutate(), mutateKpis()]);
+        return;
+      }
 
-    if (res.ok) {
-      setHasScanned(true);
-      try { localStorage.setItem("hasScanned", "1"); } catch {}
-      await Promise.all([mutate(), invMutate(), mutateKpis()]);
-      return;
+      let payload = {};
+      try { payload = await res.json(); } catch {}
+
+      if (res.status === 401) {
+        window.location.href = "/login?callbackUrl=/dashboard";
+        return;
+      }
+
+      if (payload?.error === "no_store") {
+        alert("No Shopify store connected yet. Head to Settings to connect your shop.");
+        window.location.href = "/settings";
+        return;
+      }
+
+      alert("Scan failed. Please try again.");
+    } catch (e) {
+      console.error(e);
+      alert("Network error while scanning.");
+    } finally {
+      setIsScanning(false);
     }
-
-    let payload = {};
-    try { payload = await res.json(); } catch {}
-
-    if (res.status === 401) {
-      window.location.href = "/login?callbackUrl=/dashboard";
-      return;
-    }
-
-    if (payload?.error === "no_store") {
-      alert("No Shopify store connected yet. Head to Settings to connect your shop.");
-      window.location.href = "/settings";
-      return;
-    }
-
-    alert("Scan failed. Please try again.");
-  } catch (e) {
-    console.error(e);
-    alert("Network error while scanning.");
-  } finally {
-    setIsScanning(false);
   }
-}
-
 
   async function changeCurrency(newCcy) {
     await fetch("/api/settings", {
@@ -274,6 +262,14 @@ async function scan() {
       alert("Could not open the Shopify upgrade page.");
     }
   }
+
+  return (
+    <div>
+      {/* Your dashboard JSX here */}
+    </div>
+  );
+}
+
 
   // Banners
   const showRunScanBanner = hasStore && !isScanning && !hasScanned;
@@ -597,7 +593,7 @@ async function scan() {
       </div>
     </main>
   );
-}
+
 
 // DO NOT TOUCH New wrapper exporting default with Suspense (required by Next.js)
 export default function Dashboard() {
