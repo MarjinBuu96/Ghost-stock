@@ -165,7 +165,8 @@ async function goShopifyUpgrade(plan) {
       const res = await fetch("/api/shopify/billing/manage", { method: "POST" });
       const json = await res.json().catch(() => ({}));
       if (!res.ok || !json?.url) throw new Error(json?.error || "Manage failed");
-      window.location.href = json.url;
+      window.open(json.url, "_blank");
+
     } catch {
       notify("Could not open Shopify billing");
       setBillingBusy(false);
