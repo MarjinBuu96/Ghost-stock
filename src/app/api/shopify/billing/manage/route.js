@@ -13,6 +13,7 @@ export async function POST(req) {
   const store = await getActiveStore(req);
   if (!store) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
-  const url = `https://${store.shop}/admin/apps/${process.env.SHOPIFY_API_KEY}`;
+  const url = `https://${store.shop}/admin/billing`;
+
   return NextResponse.json({ url });
 }
