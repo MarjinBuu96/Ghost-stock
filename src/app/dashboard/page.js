@@ -48,6 +48,16 @@ useEffect(() => {
     forceRedirect: true,
   });
 
+  // ✅ One-time session token exchange for Shopify compliance
+  fetchSessionToken(app).then((token) => {
+    fetch("/api/auth/session", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+  });
+
   // ✅ Attach session tokens to same-origin /api/* calls
   const originalFetch = window.fetch.bind(window);
   window.fetch = async (input, init = {}) => {
@@ -69,6 +79,7 @@ useEffect(() => {
     window.fetch = originalFetch;
   };
 }, []);
+
 
 
   // Alerts
