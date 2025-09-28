@@ -1,4 +1,3 @@
-// src/app/api/shopify/billing/upgrade/route.js
 export const runtime = "nodejs";
 
 import { NextResponse } from "next/server";
@@ -17,19 +16,16 @@ function shopFromHostParam(hostB64) {
 }
 
 function getShopFromRequest(req) {
-  // cookie
   try {
     const c = cookies();
     const cookieShop = c.get("shopify_shop")?.value;
     if (cookieShop) return String(cookieShop).toLowerCase();
   } catch {}
-  // header (embedded)
   try {
     const h = nextHeaders();
     const hdrShop = h.get("x-shopify-shop-domain");
     if (hdrShop) return String(hdrShop).toLowerCase();
   } catch {}
-  // query host fallback
   try {
     const url = new URL(req.url);
     const fromHost = shopFromHostParam(url.searchParams.get("host"));
@@ -102,11 +98,12 @@ export async function POST(req) {
     });
 
     const text = await resp.text();
+    console.log("📦 Raw Shopify billing response:", text); // ✅ Patch 1: log raw response
+
     let json;
     try { json = JSON.parse(text); } catch { json = { raw: text }; }
 
     if (!resp.ok) {
-      // Surfacing exact error helps a TON during verification
       return NextResponse.json(
         { error: "shopify_graphql_http", status: resp.status, payload: json },
         { status: 502 }
@@ -114,12 +111,19 @@ export async function POST(req) {
     }
 
     const result = json?.data?.appSubscriptionCreate;
+    if (!result) {
+      console.error("❌ Missing appSubscriptionCreate:", json); // ✅ Patch 2: guard missing mutation
+      return NextResponse.json({ error: "missing_subscription_create", payload: json }, { status: 502 });
+    }
+
     const userErrors = result?.userErrors || [];
     if (userErrors.length) {
       return NextResponse.json({ error: "shopify_user_errors", userErrors }, { status: 400 });
     }
 
     const confirmationUrl = result?.confirmationUrl;
+    console.log("✅ Confirmation URL:", confirmationUrl); // ✅ Patch 3: log confirmation URL
+
     if (!confirmationUrl) {
       return NextResponse.json({ error: "no_confirmation_url", payload: json }, { status: 500 });
     }
