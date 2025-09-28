@@ -30,6 +30,8 @@ function Banner({ tone = "info", title, body, children }) {
 
 // ⬇️ Your original component, now with everything correctly inside
 function DashboardInner() {
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+
   const appRef = useRef(null); // ✅ App Bridge ref
   const [filter, setFilter] = useState("all");
   const [isScanning, setIsScanning] = useState(false);
@@ -206,6 +208,14 @@ function DashboardInner() {
           Authorization: `Bearer ${token}`,
         },
       });
+
+      const json = await res.json().catch(() => ({}));
+
+if (res.status === 403 && json.error === "scan_limit_reached") {
+  setShowUpgradeModal(true);
+  return;
+}
+
 
       if (res.ok) {
         setHasScanned(true);
@@ -584,6 +594,31 @@ function DashboardInner() {
           <code> inventory_levels</code> next for full accuracy.
         </p>
       </div>
+      {showUpgradeModal && (
+  <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+    <div className="bg-gray-900 border border-gray-700 rounded-lg p-6 max-w-md w-full">
+      <h2 className="text-xl font-bold mb-2 text-white">Weekly Scan Limit Reached</h2>
+      <p className="text-sm text-gray-300 mb-4">
+        Upgrade to Ghost Stock Pro for unlimited scans, Slack alerts, and priority support.
+      </p>
+      <div className="flex justify-end gap-3">
+        <button
+          onClick={() => setShowUpgradeModal(false)}
+          className="px-3 py-2 rounded bg-gray-700 hover:bg-gray-600 text-sm font-semibold"
+        >
+          Not Now
+        </button>
+        <button
+          onClick={() => upgradeTo("pro")}
+          className="px-3 py-2 rounded bg-purple-500 hover:bg-purple-600 text-black text-sm font-semibold"
+        >
+          Upgrade to Pro
+        </button>
+      </div>
+    </div>
+  </div>
+)}
+
     </main>
   );
 }
