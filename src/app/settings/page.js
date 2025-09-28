@@ -46,19 +46,26 @@ useEffect(() => {
   const upgraded = params.get("upgraded");
   const billingError = params.get("billing");
 
+  console.log("🔍 charge_id from URL:", chargeId);
+
   if (chargeId) {
     fetch(`/api/shopify/billing/confirm?charge_id=${chargeId}`, {
       method: "GET",
-    }).then(() => {
-      mutate(); // ✅ Refresh settings after confirmation
-      const cleanUrl = window.location.pathname;
-      window.history.replaceState({}, "", cleanUrl); // Optional: clean up query params
-    });
+    })
+      .then((res) => {
+        console.log("✅ Billing confirm response:", res.status);
+        mutate(); // Refresh settings
+        window.history.replaceState({}, "", window.location.pathname); // Clean URL
+      })
+      .catch((err) => {
+        console.error("❌ Billing confirm failed:", err);
+      });
   }
 
   if (upgraded) notify("Your subscription has been upgraded 🎉");
   if (billingError) notify("Billing error: " + billingError);
 }, []);
+
 
 
 
