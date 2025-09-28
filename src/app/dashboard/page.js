@@ -6,8 +6,6 @@ import createApp from "@shopify/app-bridge"; // (added earlier)
 import { getSessionToken as fetchSessionToken } from "@/utils/getSessionToken"; // ✅ ADDED
 import { useState, useMemo, useEffect, useRef, Suspense } from "react";
 
-
-
 function Banner({ tone = "info", title, body, children }) {
   const styles =
     {
@@ -30,20 +28,21 @@ function Banner({ tone = "info", title, body, children }) {
   );
 }
 
-// ⬇️ Your original component, unchanged, just renamed
-
-
-
+// ⬇️ Your original component, now with everything correctly inside
 function DashboardInner() {
-  const appRef = useRef(null); // ✅ Declare App Bridge ref
+  const appRef = useRef(null); // ✅ App Bridge ref
+  const [filter, setFilter] = useState("all");
+  const [isScanning, setIsScanning] = useState(false);
+  const [countingIds, setCountingIds] = useState(() => new Set());
+  const [hasScanned, setHasScanned] = useState(false);
 
+  // App Bridge init + tokenized fetch
   useEffect(() => {
     if (typeof window === "undefined") return;
 
     const params = new URLSearchParams(window.location.search);
     const host = params.get("host");
     const shopDomain = params.get("shop");
-
     if (!host && !shopDomain) return;
 
     const app = createApp({
@@ -52,19 +51,17 @@ function DashboardInner() {
       forceRedirect: true,
     });
 
-    appRef.current = app; // ✅ Store App Bridge instance
+    appRef.current = app;
 
-    // Session token exchange
+    // Session token exchange (optional bootstrap)
     fetchSessionToken(app).then((token) => {
       fetch("/api/auth/session", {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
+        headers: { Authorization: `Bearer ${token}` },
+      }).catch(() => {});
     });
 
-    // Patch fetch to auto-attach token
+    // Patch fetch to auto-attach token to same-origin /api/*
     const originalFetch = window.fetch.bind(window);
     window.fetch = async (input, init = {}) => {
       try {
@@ -84,25 +81,10 @@ function DashboardInner() {
     };
   }, []);
 
-  // ✅ Now you can use appRef.current inside scan()
-  // const app = appRef.current;
-  // const token = await fetchSessionToken(app);
-
-  return (
-    <div>
-      {/* Your dashboard JSX here */}
-    </div>
-  );
-}
-
-// Alerts
+  // Alerts
   const { data, error, isLoading, mutate } = useSWR("/api/alerts", fetcher, { refreshInterval: 0 });
-  const [filter, setFilter] = useState("all");
-  const [isScanning, setIsScanning] = useState(false);
-  const [countingIds, setCountingIds] = useState(() => new Set());
 
   // Track “first scan done”
-  const [hasScanned, setHasScanned] = useState(false);
   useEffect(() => {
     try {
       if (localStorage.getItem("hasScanned") === "1") setHasScanned(true);
@@ -206,56 +188,56 @@ function DashboardInner() {
     }
   }
 
-async function scan() {
-  try {
-    setIsScanning(true);
+  async function scan() {
+    try {
+      setIsScanning(true);
 
-    const app = appRef.current;
-    if (!app) {
-      alert("App Bridge not initialized.");
-      return;
+      const app = appRef.current;
+      if (!app) {
+        alert("App Bridge not initialized.");
+        return;
+      }
+
+      const token = await fetchSessionToken(app);
+
+      const res = await fetch("/api/shopify/scan", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (res.ok) {
+        setHasScanned(true);
+        try {
+          localStorage.setItem("hasScanned", "1");
+        } catch {}
+        await Promise.all([mutate(), invMutate(), mutateKpis()]);
+        return;
+      }
+
+      let payload = {};
+      try {
+        payload = await res.json();
+      } catch {}
+
+      if (res.status === 401) {
+        window.location.href = "/login?callbackUrl=/dashboard";
+        return;
+      }
+      if (payload?.error === "no_store") {
+        alert("No Shopify store connected yet. Head to Settings to connect your shop.");
+        window.location.href = "/settings";
+        return;
+      }
+      alert("Scan failed. Please try again.");
+    } catch (e) {
+      console.error(e);
+      alert("Network error while scanning.");
+    } finally {
+      setIsScanning(false);
     }
-
-    const token = await fetchSessionToken(app);
-
-    const res = await fetch("/api/shopify/scan", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
-
-    if (res.ok) {
-      setHasScanned(true);
-      try { localStorage.setItem("hasScanned", "1"); } catch {}
-      await Promise.all([mutate(), invMutate(), mutateKpis()]);
-      return;
-    }
-
-    let payload = {};
-    try { payload = await res.json(); } catch {}
-
-    if (res.status === 401) {
-      window.location.href = "/login?callbackUrl=/dashboard";
-      return;
-    }
-
-    if (payload?.error === "no_store") {
-      alert("No Shopify store connected yet. Head to Settings to connect your shop.");
-      window.location.href = "/settings";
-      return;
-    }
-
-    alert("Scan failed. Please try again.");
-  } catch (e) {
-    console.error(e);
-    alert("Network error while scanning.");
-  } finally {
-    setIsScanning(false);
   }
-}
-
-
 
   async function changeCurrency(newCcy) {
     await fetch("/api/settings", {
@@ -604,7 +586,7 @@ async function scan() {
       </div>
     </main>
   );
-
+}
 
 // DO NOT TOUCH New wrapper exporting default with Suspense (required by Next.js)
 export default function Dashboard() {
