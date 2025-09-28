@@ -11,6 +11,7 @@ export async function POST(req) {
 
     const decoded = jwt.decode(token);
     if (!decoded?.dest) {
+      console.error("Missing dest in token:", decoded);
       return NextResponse.json({ ok: false, error: "Missing dest in token" }, { status: 400 });
     }
 
@@ -19,15 +20,22 @@ export async function POST(req) {
       return NextResponse.json({ ok: false, error: "Invalid shop domain" }, { status: 400 });
     }
 
+    // Optional fallback for required fields like userEmail
+    const fallbackEmail = decoded?.email || "unknown@ghost-stock.co.uk";
+
     await prisma.store.upsert({
       where: { shop },
       update: { accessToken: token },
-      create: { shop, accessToken: token },
+      create: {
+        shop,
+        accessToken: token,
+        userEmail: fallbackEmail, // only if userEmail is required in schema
+      },
     });
 
     return NextResponse.json({ ok: true, shop });
   } catch (err) {
     console.error("Session route error:", err);
-    return NextResponse.json({ ok: false, error: "Server error" }, { status: 500 });
+    return NextResponse.json({ ok: false, error: "Server error", details: err.message }, { status: 500 });
   }
 }
