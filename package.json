@@ -13,6 +13,7 @@
     "@shopify/app-bridge": "^3.7.10",
     "@shopify/app-bridge-utils": "^3.5.1",
     "autoprefixer": "^10.4.21",
+    "jsonwebtoken": "^9.0.2",
     "next": "15.4.6",
     "next-auth": "^4.24.11",
     "nodemailer": "^6.10.1",
