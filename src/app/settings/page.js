@@ -40,6 +40,23 @@ export default function SettingsPage() {
     setNotificationEmail(settings?.notificationEmail || "");
   }, [settings?.slackWebhookUrl, settings?.notificationEmail]);
 
+  useEffect(() => {
+  const params = new URLSearchParams(window.location.search);
+  const chargeId = params.get("charge_id");
+  const upgraded = params.get("upgraded");
+  const billingError = params.get("billing");
+
+  if (chargeId) {
+    fetch(`/api/shopify/billing/confirm?charge_id=${chargeId}`, {
+      method: "GET",
+    });
+  }
+
+  if (upgraded) notify("Your subscription has been upgraded 🎉");
+  if (billingError) notify("Billing error: " + billingError);
+}, []);
+
+
   const currency = settings?.currency || "GBP";
 
   function notify(msg) {
