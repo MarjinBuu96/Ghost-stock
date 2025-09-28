@@ -11,7 +11,7 @@ const STATE_COOKIE = "shopify_oauth_state";
 const SHOP_COOKIE  = "shopify_shop";
 const SHOPIFY_API_VERSION = "2025-07";
 
-async function ensureComplianceWebhooks(shop, accessToken, appOrigin) {
+async function ensureComplianceWebhooks(shop: string, accessToken: string, appOrigin: string) {
   const address = `${appOrigin}/api/shopify/webhooks`;
   const base = `https://${shop}/admin/api/${SHOPIFY_API_VERSION}/webhooks.json`;
   const headers = {
@@ -32,7 +32,7 @@ async function ensureComplianceWebhooks(shop, accessToken, appOrigin) {
   }
 }
 
-export async function GET(req) {
+export async function GET(req: Request) {
   const url = new URL(req.url);
   const shop = (url.searchParams.get("shop") || "").toLowerCase();
   const state = url.searchParams.get("state") || "";
@@ -46,13 +46,7 @@ export async function GET(req) {
     return NextResponse.json({ error: "bad_hmac" }, { status: 401 });
   }
 
-  let rec = null;
-  try {
-    rec = await prisma.oAuthState.findUnique({ where: { state } });
-  } catch (err) {
-    console.warn("⚠️ Failed to fetch OAuth state:", err);
-  }
-
+  const rec = await prisma.oAuthState.findUnique({ where: { state } }).catch(() => null);
   const recOk = !!rec && rec.shop === shop &&
     Date.now() - rec.createdAt.getTime() <= STATE_MAX_AGE_MS;
 
@@ -64,11 +58,7 @@ export async function GET(req) {
   }
 
   if (recOk) {
-    try {
-      await prisma.oAuthState.delete({ where: { state } });
-    } catch (err) {
-      console.warn("⚠️ Failed to delete OAuth state:", err);
-    }
+    await prisma.oAuthState.delete({ where: { state } }).catch(() => {});
   }
 
   const code = url.searchParams.get("code") || "";
@@ -92,22 +82,20 @@ export async function GET(req) {
 
   const accessToken = payload.access_token;
 
-  try {
-    await prisma.store.upsert({
-      where: { shop },
-      update: { accessToken, updatedAt: new Date() },
-      create: {
-        shop,
-        accessToken,
-        userEmail: shop,
-        createdAt: new Date(),
-      },
-    });
-    console.log("✅ Store upserted:", shop);
-  } catch (err) {
-    console.error("❌ Failed to upsert store:", err);
-    return NextResponse.json({ error: "store_upsert_failed" }, { status: 500 });
-  }
+  // ✅ This is the real Shopify token—not a JWT
+  await prisma.store.upsert({
+    where: { shop },
+    update: {
+      accessToken,
+      updatedAt: new Date(),
+    },
+    create: {
+      shop,
+      accessToken,
+      userEmail: shop,
+      createdAt: new Date(),
+    },
+  });
 
   await ensureComplianceWebhooks(shop, accessToken, url.origin);
 
