@@ -137,23 +137,15 @@ model CountItem {
 
 model Store {
   id          String   @id @default(cuid())
-
-  // org is optional for backfill/new installs
-  orgId       String?
-  org         Organization? @relation(fields: [orgId], references: [id], onDelete: SetNull)
-
-  userEmail   String
   shop        String   @unique
   accessToken String
   currency    String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   lastScanAt  DateTime?
-
   alerts      Alert[]
-
-  @@index([userEmail])
 }
+
 
 model OAuthState {
   state     String   @id           // random UUID, unique

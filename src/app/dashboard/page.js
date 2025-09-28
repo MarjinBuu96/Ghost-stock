@@ -200,7 +200,7 @@ function DashboardInner() {
 
       const token = await fetchSessionToken(app);
 
-      const res = await fetch("/api/shopify/scan", {
+      const res = await fetch("/api/scan", {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
