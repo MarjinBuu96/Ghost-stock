@@ -4,8 +4,8 @@ generator client {
 
 datasource db {
   provider  = "postgresql"
-  url       = env("DATABASE_URL") // pooled connection (Neon Pooler)
-  directUrl = env("DIRECT_URL") // direct connection (writer)
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 model Alert {
@@ -30,8 +30,8 @@ model UserSettings {
   id                String   @id @default(cuid())
   userEmail         String   @unique
   currency          String   @default("USD")
-  plan              String   @default("starter") // free | starter | pro | enterprise
-  stripeCustomerId  String? // safe to keep optional even if unused now
+  plan              String   @default("starter")
+  stripeCustomerId  String?
   slackWebhookUrl   String?
   notificationEmail String?
   createdAt         DateTime @default(now())
@@ -39,11 +39,10 @@ model UserSettings {
 }
 
 model Organization {
-  id        String   @id @default(cuid())
-  name      String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
+  id            String         @id @default(cuid())
+  name          String
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
   stores        Store[]
   memberships   Membership[]
   auditLogs     AuditLog[]
@@ -52,80 +51,68 @@ model Organization {
 }
 
 model Membership {
-  id    String       @id @default(cuid())
-  orgId String
-  org   Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
-
+  id        String       @id @default(cuid())
+  orgId     String
+  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
   userEmail String
-  role      String // 'owner' | 'manager' | 'viewer'
-
-  createdAt DateTime @default(now())
+  role      String
+  createdAt DateTime     @default(now())
 
   @@unique([orgId, userEmail])
   @@index([userEmail])
 }
 
 model AuditLog {
-  id String @id @default(cuid())
-
-  // Make org optional so we can log before org is created
-  orgId String?
-  org   Organization? @relation(fields: [orgId], references: [id], onDelete: SetNull)
-
-  actor     String // email (or shop string)
-  action    String // e.g. "alert.resolve", "count.start", "rule.create"
-  target    String? // e.g. alertId / sessionId / ruleId / sku
+  id        String        @id @default(cuid())
+  orgId     String?
+  org       Organization? @relation(fields: [orgId], references: [id], onDelete: SetNull)
+  actor     String
+  action    String
+  target    String?
   meta      Json?
-  createdAt DateTime @default(now())
+  createdAt DateTime      @default(now())
 
   @@index([orgId, createdAt])
   @@index([createdAt])
 }
 
 model Rule {
-  id    String       @id @default(cuid())
-  orgId String
-  org   Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
-
+  id        String       @id @default(cuid())
+  orgId     String
+  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
   name      String
-  isActive  Boolean @default(true)
+  isActive  Boolean      @default(true)
   jsonLogic Json
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
 
   @@index([orgId, isActive])
 }
 
 model CountSession {
-  id    String       @id @default(cuid())
-  orgId String
-  org   Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
-
-  startedBy String // email/shop who started it
-  assignee  String?
-  dueAt     DateTime?
-  status    String    @default("open") // open | completed | canceled
-
-  createdAt   DateTime  @default(now())
+  id          String       @id @default(cuid())
+  orgId       String
+  org         Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  startedBy   String
+  assignee    String?
+  dueAt       DateTime?
+  status      String       @default("open")
+  createdAt   DateTime     @default(now())
   completedAt DateTime?
-
-  items CountItem[]
+  items       CountItem[]
 }
 
 model CountItem {
   id        String       @id @default(cuid())
   sessionId String
   session   CountSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-
-  sku      String
-  product  String?
-  expected Int?
-  counted  Int?
-  status   String  @default("pending") // pending | counted | skipped
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  sku       String
+  product   String?
+  expected  Int?
+  counted   Int?
+  status    String       @default("pending")
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
 }
 
 model Store {
@@ -137,12 +124,12 @@ model Store {
   updatedAt      DateTime      @updatedAt
   lastScanAt     DateTime?
   alerts         Alert[]
-  organization   Organization? @relation(fields: [organizationId], references: [id])
   organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id])
 }
 
 model OAuthState {
-  state     String   @id // random UUID, unique
+  state     String   @id
   shop      String
   createdAt DateTime @default(now())
 
