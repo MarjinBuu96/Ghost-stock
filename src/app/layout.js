@@ -1,7 +1,7 @@
 // src/app/layout.js
 import "./globals.css";
 import Link from "next/link";
-import Script from "next/script";
+// ❌ remove: import Script from "next/script";
 
 export const metadata = {
   title: "Ghost Stock Killer",
@@ -12,32 +12,32 @@ export default function RootLayout({ children }) {
   return (
     <html lang="en">
       <head>
-        {/* ✅ Load App Bridge from Shopify’s CDN so the checker sees it */}
-        <Script
+        {/* ✅ MUST be the first <script>, no async/defer/module */}
+        <script
           id="shopify-app-bridge-cdn"
           src="https://cdn.shopify.com/shopifycloud/app-bridge.js"
-          strategy="beforeInteractive"
+        ></script>
+
+        {/* optional bootstrap: keep it AFTER the CDN tag */}
+        <script
+          id="app-bridge-init"
+          dangerouslySetInnerHTML={{
+            __html: `
+              (function () {
+                var params = new URLSearchParams(window.location.search);
+                var host = params.get('host');
+                if (!host || !window.appBridge || !window.appBridge.createApp) return;
+                if (!window.__SHOPIFY_APP__) {
+                  window.__SHOPIFY_APP__ = window.appBridge.createApp({
+                    apiKey: "${process.env.NEXT_PUBLIC_SHOPIFY_API_KEY}",
+                    host: host,
+                    forceRedirect: true
+                  });
+                }
+              })();
+            `,
+          }}
         />
-
-        {/* (optional) tiny bootstrap that uses the correct global name */}
-        <Script id="app-bridge-init" strategy="beforeInteractive">
-          {`
-            (function () {
-              var params = new URLSearchParams(window.location.search);
-              var host = params.get('host');
-              if (!host || !window.appBridge || !window.appBridge.createApp) return;
-
-              // create once and reuse
-              if (!window.__SHOPIFY_APP__) {
-                window.__SHOPIFY_APP__ = window.appBridge.createApp({
-                  apiKey: "${process.env.NEXT_PUBLIC_SHOPIFY_API_KEY}",
-                  host: host,
-                  forceRedirect: true
-                });
-              }
-            })();
-          `}
-        </Script>
       </head>
 
       <body className="bg-gray-900 text-white min-h-screen">
