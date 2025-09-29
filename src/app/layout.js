@@ -1,6 +1,6 @@
 // src/app/layout.js
 import "./globals.css";
-import Link from "next/link";
+import ClientNav from "@/components/ClientNav"; // 👈 new client nav
 
 export const metadata = {
   title: "Ghost Stock Killer",
@@ -19,18 +19,7 @@ export default function RootLayout({ children }) {
       </head>
 
       <body className="bg-gray-900 text-white min-h-screen">
-        <nav className="bg-gray-800 text-white px-6 py-4 flex items-center justify-between">
-          <h1 className="text-xl font-bold">
-            <Link href="/">Ghost Stock Killer</Link>
-          </h1>
-          <div className="flex gap-4 text-sm items-center">
-            <Link href="/" className="hover:text-green-400">Home</Link>
-            <Link href="/dashboard" className="hover:text-green-400">Dashboard</Link>
-            <Link href="/settings" className="hover:text-green-400">Settings</Link>
-            <a href="/#pricing" className="hover:text-green-400">Pricing</a>
-          </div>
-        </nav>
-
+        <ClientNav />   {/* 👈 preserves ?host=... on all links */}
         {children}
       </body>
     </html>
