@@ -22,43 +22,51 @@ export default function RootLayout({ children }) {
         <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
 
         {/* ✅ App Bridge bootstrap logic */}
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `
-              (function () {
-                try {
-                  var qs = new URLSearchParams(window.location.search);
-                  var host = qs.get('host');
+<script
+  dangerouslySetInnerHTML={{
+    __html: `
+      (function () {
+        try {
+          var qs = new URLSearchParams(window.location.search);
+          var host = qs.get('host');
+          if (!host) {
+            var m = document.cookie.match(/(?:^|;\\s*)shopifyHost=([^;]+)/);
+            if (m) host = m[1];
+          }
+          if (!host) return;
 
-                  // fallback to cookie if middleware already stored it
-                  if (!host) {
-                    var m = document.cookie.match(/(?:^|;\\s*)shopifyHost=([^;]+)/);
-                    if (m) host = m[1];
-                  }
-                  if (!host) return;
+          var AppBridge =
+            window.shopify ||
+            window.appBridge ||
+            window["app-bridge"] ||
+            null;
 
-                  var createApp =
-                    (window.shopify && window.shopify.createApp) ||
-                    (window.appBridge && window.appBridge.createApp) ||
-                    (window["app-bridge"] && window["app-bridge"].default) ||
-                    null;
+          if (!AppBridge) return;
 
-                  if (!createApp) return;
+          window.appBridge = AppBridge; // ✅ force expose
 
-                  if (!window.__SHOPIFY_APP__) {
-                    window.__SHOPIFY_APP__ = createApp({
-                      apiKey: "${process.env.NEXT_PUBLIC_SHOPIFY_API_KEY || "5860dca7a3c5d0818a384115d221179a"}",
-                      host: host,
-                      forceRedirect: true
-                    });
-                  }
-                } catch (e) {
-                  console.error("App Bridge init failed:", e);
-                }
-              })();
-            `,
-          }}
-        />
+          var createApp =
+            AppBridge.createApp ||
+            AppBridge.default ||
+            null;
+
+          if (!createApp) return;
+
+          if (!window.__SHOPIFY_APP__) {
+            window.__SHOPIFY_APP__ = createApp({
+              apiKey: "${process.env.NEXT_PUBLIC_SHOPIFY_API_KEY || "5860dca7a3c5d0818a384115d221179a"}",
+              host: host,
+              forceRedirect: true
+            });
+          }
+        } catch (e) {
+          console.error("App Bridge init failed:", e);
+        }
+      })();
+    `,
+  }}
+/>
+
       </head>
 
       <body className="bg-gray-900 text-white min-h-screen">
