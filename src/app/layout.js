@@ -11,6 +11,35 @@ export const metadata = {
 export default function RootLayout({ children }) {
   return (
     <html lang="en">
+      <head>
+        {/* ✅ Load App Bridge from Shopify’s CDN so the checker sees it */}
+        <Script
+          id="shopify-app-bridge-cdn"
+          src="https://cdn.shopify.com/shopifycloud/app-bridge.js"
+          strategy="beforeInteractive"
+        />
+
+        {/* (optional) tiny bootstrap that uses the correct global name */}
+        <Script id="app-bridge-init" strategy="beforeInteractive">
+          {`
+            (function () {
+              var params = new URLSearchParams(window.location.search);
+              var host = params.get('host');
+              if (!host || !window.appBridge || !window.appBridge.createApp) return;
+
+              // create once and reuse
+              if (!window.__SHOPIFY_APP__) {
+                window.__SHOPIFY_APP__ = window.appBridge.createApp({
+                  apiKey: "${process.env.NEXT_PUBLIC_SHOPIFY_API_KEY}",
+                  host: host,
+                  forceRedirect: true
+                });
+              }
+            })();
+          `}
+        </Script>
+      </head>
+
       <body className="bg-gray-900 text-white min-h-screen">
         <nav className="bg-gray-800 text-white px-6 py-4 flex items-center justify-between">
           <h1 className="text-xl font-bold">
@@ -23,28 +52,6 @@ export default function RootLayout({ children }) {
             <a href="/#pricing" className="hover:text-green-400">Pricing</a>
           </div>
         </nav>
-
-        {/* 👇 Add a script to initialize App Bridge */}
-        <Script id="app-bridge-init" strategy="afterInteractive">
-          {`
-            (function() {
-              const urlParams = new URLSearchParams(window.location.search);
-              const host = urlParams.get('host');
-              if (!host) return;
-
-              window.app = window['app-bridge'].default;
-              window.actions = window.app.actions;
-
-              const app = window.app.createApp({
-                apiKey: "${process.env.NEXT_PUBLIC_SHOPIFY_API_KEY}",
-                host: host,
-                forceRedirect: true,
-              });
-
-              window.shopifyApp = app;
-            })();
-          `}
-        </Script>
 
         {children}
       </body>

@@ -41,49 +41,60 @@ function DashboardInner() {
   const [hasScanned, setHasScanned] = useState(false);
 
   // App Bridge init + tokenized fetch
-  useEffect(() => {
-    if (typeof window === "undefined") return;
+// App Bridge init + tokenized fetch
+useEffect(() => {
+  if (typeof window === "undefined") return;
 
-    const params = new URLSearchParams(window.location.search);
-    const host = params.get("host");
-    const shopDomain = params.get("shop");
-    if (!host && !shopDomain) return;
+  const params = new URLSearchParams(window.location.search);
+  const host = params.get("host");
+  const shopDomain = params.get("shop");
+  if (!host && !shopDomain) return;
 
-    const app = createApp({
+  // ✅ prefer CDN global if available; fall back to NPM import
+  const createAppFn =
+    (window.appBridge && typeof window.appBridge.createApp === "function"
+      ? window.appBridge.createApp
+      : createApp);
+
+  // ✅ avoid double init across navigations
+  if (!window.__SHOPIFY_APP__) {
+    window.__SHOPIFY_APP__ = createAppFn({
       apiKey: "5860dca7a3c5d0818a384115d221179a",
       ...(host ? { host } : { shopOrigin: shopDomain }),
       forceRedirect: true,
     });
+  }
 
-    appRef.current = app;
+  const app = window.__SHOPIFY_APP__;
+  appRef.current = app;
 
-    // Session token exchange (optional bootstrap)
-    fetchSessionToken(app).then((token) => {
-      fetch("/api/auth/session", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-      }).catch(() => {});
-    });
+  // Session token exchange (optional bootstrap)
+  fetchSessionToken(app).then((token) => {
+    fetch("/api/auth/session", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    }).catch(() => {});
+  });
 
-    // Patch fetch to auto-attach token to same-origin /api/*
-    const originalFetch = window.fetch.bind(window);
-    window.fetch = async (input, init = {}) => {
-      try {
-        const url = typeof input === "string" ? input : input?.url || "";
-        if (url.startsWith("/api")) {
-          const token = await fetchSessionToken(app);
-          const headers = new Headers(init.headers || {});
-          headers.set("Authorization", `Bearer ${token}`);
-          return originalFetch(input, { ...init, headers });
-        }
-      } catch (_) {}
-      return originalFetch(input, init);
-    };
+  // Patch fetch to auto-attach token to same-origin /api/*
+  const originalFetch = window.fetch.bind(window);
+  window.fetch = async (input, init = {}) => {
+    try {
+      const url = typeof input === "string" ? input : input?.url || "";
+      if (url.startsWith("/api")) {
+        const token = await fetchSessionToken(app);
+        const headers = new Headers(init.headers || {});
+        headers.set("Authorization", `Bearer ${token}`);
+        return originalFetch(input, { ...init, headers });
+      }
+    } catch (_) {}
+    return originalFetch(input, init);
+  };
 
-    return () => {
-      window.fetch = originalFetch;
-    };
-  }, []);
+  return () => {
+    window.fetch = originalFetch;
+  };
+}, []);
 
   // Alerts
   const { data, error, isLoading, mutate } = useSWR("/api/alerts", fetcher, { refreshInterval: 0 });
