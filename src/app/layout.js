@@ -1,7 +1,6 @@
 // src/app/layout.js
 import "./globals.css";
 import Link from "next/link";
-// ❌ remove: import Script from "next/script";
 
 export const metadata = {
   title: "Ghost Stock Killer",
@@ -12,32 +11,11 @@ export default function RootLayout({ children }) {
   return (
     <html lang="en">
       <head>
-        {/* ✅ MUST be the first <script>, no async/defer/module */}
+        {/* MUST be a plain <script>, first in <head>, no async/defer/module */}
         <script
           id="shopify-app-bridge-cdn"
           src="https://cdn.shopify.com/shopifycloud/app-bridge.js"
         ></script>
-
-        {/* optional bootstrap: keep it AFTER the CDN tag */}
-        <script
-          id="app-bridge-init"
-          dangerouslySetInnerHTML={{
-            __html: `
-              (function () {
-                var params = new URLSearchParams(window.location.search);
-                var host = params.get('host');
-                if (!host || !window.appBridge || !window.appBridge.createApp) return;
-                if (!window.__SHOPIFY_APP__) {
-                  window.__SHOPIFY_APP__ = window.appBridge.createApp({
-                    apiKey: "${process.env.NEXT_PUBLIC_SHOPIFY_API_KEY}",
-                    host: host,
-                    forceRedirect: true
-                  });
-                }
-              })();
-            `,
-          }}
-        />
       </head>
 
       <body className="bg-gray-900 text-white min-h-screen">
