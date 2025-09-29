@@ -45,18 +45,31 @@ function DashboardInner() {
 useEffect(() => {
   if (typeof window === "undefined") return;
 
+  // --- Find host robustly: URL → sessionStorage → cookie
   const params = new URLSearchParams(window.location.search);
-  const host = params.get("host");
+  let host = params.get("host");
   const shopDomain = params.get("shop");
+
+  try {
+    if (!host) host = sessionStorage.getItem("__shopify_host") || host;
+    if (!host) {
+      const m = document.cookie.match(/(?:^|;\s*)shopifyHost=([^;]+)/);
+      if (m) host = m[1];
+    }
+    if (host) sessionStorage.setItem("__shopify_host", host);
+  } catch {}
+
   if (!host && !shopDomain) return;
 
-  // ✅ prefer CDN global if available; fall back to NPM import
+  // --- Prefer the CDN global (v3: window.shopify) then older window.appBridge, then NPM import
   const createAppFn =
-    (window.appBridge && typeof window.appBridge.createApp === "function"
-      ? window.appBridge.createApp
-      : createApp);
+    (window.shopify && typeof window.shopify.createApp === "function"
+      ? window.shopify.createApp
+      : (window.appBridge && typeof window.appBridge.createApp === "function"
+          ? window.appBridge.createApp
+          : createApp));
 
-  // ✅ avoid double init across navigations
+  // --- Avoid double init across navigations
   if (!window.__SHOPIFY_APP__) {
     window.__SHOPIFY_APP__ = createAppFn({
       apiKey: "5860dca7a3c5d0818a384115d221179a",
@@ -95,6 +108,7 @@ useEffect(() => {
     window.fetch = originalFetch;
   };
 }, []);
+
 
   // Alerts
   const { data, error, isLoading, mutate } = useSWR("/api/alerts", fetcher, { refreshInterval: 0 });
