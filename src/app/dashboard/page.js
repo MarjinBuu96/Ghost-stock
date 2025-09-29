@@ -80,6 +80,7 @@ useEffect(() => {
 
   const app = window.__SHOPIFY_APP__;
   appRef.current = app;
+  if (app && !window.__SHOPIFY_APP__) window.__SHOPIFY_APP__ = app;
 
   // Session token exchange (optional bootstrap)
   fetchSessionToken(app).then((token) => {
