@@ -12,16 +12,16 @@ export default function RootLayout({ children }) {
   return (
     <html lang="en">
       <head>
-        {/* (optional but harmless) lets some builds auto-read the key */}
+        {/* ✅ Optional: lets some builds auto-read the key */}
         <meta
           name="shopify-api-key"
           content={process.env.NEXT_PUBLIC_SHOPIFY_API_KEY || "5860dca7a3c5d0818a384115d221179a"}
         />
 
-        {/* MUST be plain (no async/defer/module) */}
+        {/* ✅ Shopify App Bridge CDN script FIRST */}
         <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
 
-        {/* ✅ Universal bootstrap: picks the right global, creates app once, and stores it */}
+        {/* ✅ App Bridge bootstrap logic */}
         <script
           dangerouslySetInnerHTML={{
             __html: `
@@ -44,6 +44,7 @@ export default function RootLayout({ children }) {
                     null;
 
                   if (!createApp) return;
+
                   if (!window.__SHOPIFY_APP__) {
                     window.__SHOPIFY_APP__ = createApp({
                       apiKey: "${process.env.NEXT_PUBLIC_SHOPIFY_API_KEY || "5860dca7a3c5d0818a384115d221179a"}",
@@ -51,7 +52,9 @@ export default function RootLayout({ children }) {
                       forceRedirect: true
                     });
                   }
-                } catch (e) {}
+                } catch (e) {
+                  console.error("App Bridge init failed:", e);
+                }
               })();
             `,
           }}
