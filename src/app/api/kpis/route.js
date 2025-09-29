@@ -52,7 +52,9 @@ export async function GET() {
 
     for (const a of alerts) {
       const key = a.sku;
-      const price = priceMap.get(key) ?? 0;
+      const fallbackPrice = key.startsWith("DEMO") ? 20 : 0;
+      const price = priceMap.get(key) ?? fallbackPrice;
+
       const deficit = Math.max((a.expectedMin ?? 0) - (a.systemQty ?? 0), 0);
       atRiskRevenue += deficit * price;
 
