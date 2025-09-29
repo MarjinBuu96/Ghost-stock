@@ -1,7 +1,7 @@
 // src/app/layout.js
 import "./globals.css";
-import { Suspense } from "react";
-import ClientNav from "@/components/ClientNav";
+import Link from "next/link";
+import Script from "next/script"; // ✅ Add this import
 
 export const metadata = {
   title: "Ghost Stock Killer",
@@ -12,17 +12,25 @@ export default function RootLayout({ children }) {
   return (
     <html lang="en">
       <head>
-        <meta
-          name="shopify-api-key"
-          content={process.env.NEXT_PUBLIC_SHOPIFY_API_KEY || "5860dca7a3c5d0818a384115d221179a"}
+        {/* ✅ Load App Bridge from Shopify’s CDN FIRST */}
+        <Script
+          id="shopify-app-bridge-cdn"
+          src="https://cdn.shopify.com/shopifycloud/app-bridge.js"
+          strategy="beforeInteractive"
         />
-        {/* MUST be a plain tag (no async/defer/module) */}
-        <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
       </head>
       <body className="bg-gray-900 text-white min-h-screen">
-        <Suspense fallback={null}>
-          <ClientNav />
-        </Suspense>
+        <nav className="bg-gray-800 text-white px-6 py-4 flex items-center justify-between">
+          <h1 className="text-xl font-bold">
+            <Link href="/">Ghost Stock Killer</Link>
+          </h1>
+          <div className="flex gap-4 text-sm items-center">
+            <Link href="/" className="hover:text-green-400">Home</Link>
+            <Link href="/dashboard" className="hover:text-green-400">Dashboard</Link>
+            <Link href="/settings" className="hover:text-green-400">Settings</Link>
+            <a href="/#pricing" className="hover:text-green-400">Pricing</a>
+          </div>
+        </nav>
         {children}
       </body>
     </html>
