@@ -12,34 +12,13 @@ export default function RootLayout({ children }) {
   return (
     <html lang="en">
       <head>
-        {/* MUST be a plain tag (no async/defer/module) */}
-        <script
-          id="shopify-app-bridge-cdn"
-          src="https://cdn.shopify.com/shopifycloud/app-bridge.js"
-        ></script>
-
-        {/* 👇 Early bootstrap so Shopify removes its click-block overlay */}
-        <script
-          id="app-bridge-bootstrap"
-          dangerouslySetInnerHTML={{
-            __html: `
-              (function () {
-                try {
-                  var qs = new URLSearchParams(window.location.search);
-                  var host = qs.get('host');
-                  if (!host) return;
-                  if (window.appBridge && !window.__SHOPIFY_APP__) {
-                    window.__SHOPIFY_APP__ = window.appBridge.createApp({
-                      apiKey: "${process.env.NEXT_PUBLIC_SHOPIFY_API_KEY || "5860dca7a3c5d0818a384115d221179a"}",
-                      host: host,
-                      forceRedirect: true
-                    });
-                  }
-                } catch (e) {}
-              })();
-            `,
-          }}
+        {/* REQUIRED for CDN App Bridge to auto-init */}
+        <meta
+          name="shopify-api-key"
+          content={process.env.NEXT_PUBLIC_SHOPIFY_API_KEY || "5860dca7a3c5d0818a384115d221179a"}
         />
+        {/* Must be a plain script, no async/defer/module, and early in <head> */}
+        <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
       </head>
 
       <body className="bg-gray-900 text-white min-h-screen">
