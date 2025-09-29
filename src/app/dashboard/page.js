@@ -45,44 +45,29 @@ function DashboardInner() {
 useEffect(() => {
   if (typeof window === "undefined") return;
 
-  // --- Find host robustly: URL → sessionStorage → cookie
+  // Pull host from URL or the cookie middleware set
   const params = new URLSearchParams(window.location.search);
-  let host = params.get("host");
-  const shopDomain = params.get("shop");
+  const urlHost = params.get("host");
+  const cookieHost = document.cookie.match(/(?:^|;\s*)shopifyHost=([^;]+)/)?.[1] || null;
+  const host = urlHost || cookieHost;
+  if (!host) return;
 
-  try {
-    if (!host) host = sessionStorage.getItem("__shopify_host") || host;
-    if (!host) {
-      const m = document.cookie.match(/(?:^|;\s*)shopifyHost=([^;]+)/);
-      if (m) host = m[1];
-    }
-    if (host) sessionStorage.setItem("__shopify_host", host);
-  } catch {}
+  // Prefer NPM import; CDN globals are inconsistent
+  const createAppFn = createApp;
 
-  if (!host && !shopDomain) return;
-
-  // --- Prefer the CDN global (v3: window.shopify) then older window.appBridge, then NPM import
-  const createAppFn =
-    (window.shopify && typeof window.shopify.createApp === "function"
-      ? window.shopify.createApp
-      : (window.appBridge && typeof window.appBridge.createApp === "function"
-          ? window.appBridge.createApp
-          : createApp));
-
-  // --- Avoid double init across navigations
-  if (!window.__SHOPIFY_APP__) {
-    window.__SHOPIFY_APP__ = createAppFn({
+  // Reuse if exists, otherwise create & publish for debug
+  let app = window.__SHOPIFY_APP__;
+  if (!app) {
+    app = createAppFn({
       apiKey: "5860dca7a3c5d0818a384115d221179a",
-      ...(host ? { host } : { shopOrigin: shopDomain }),
+      host,
       forceRedirect: true,
     });
+    window.__SHOPIFY_APP__ = app;
   }
-
-  const app = window.__SHOPIFY_APP__;
   appRef.current = app;
-  if (app && !window.__SHOPIFY_APP__) window.__SHOPIFY_APP__ = app;
 
-  // Session token exchange (optional bootstrap)
+  // Bootstrap session token once
   fetchSessionToken(app).then((token) => {
     fetch("/api/auth/session", {
       method: "POST",
@@ -90,7 +75,7 @@ useEffect(() => {
     }).catch(() => {});
   });
 
-  // Patch fetch to auto-attach token to same-origin /api/*
+  // Patch fetch with token for /api/* on same origin
   const originalFetch = window.fetch.bind(window);
   window.fetch = async (input, init = {}) => {
     try {
@@ -101,7 +86,7 @@ useEffect(() => {
         headers.set("Authorization", `Bearer ${token}`);
         return originalFetch(input, { ...init, headers });
       }
-    } catch (_) {}
+    } catch {}
     return originalFetch(input, init);
   };
 
@@ -109,6 +94,7 @@ useEffect(() => {
     window.fetch = originalFetch;
   };
 }, []);
+
 
 
   // Alerts
