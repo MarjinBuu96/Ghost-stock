@@ -1,7 +1,7 @@
 // src/app/layout.js
 import "./globals.css";
-import Link from "next/link";
-import Script from "next/script"; // ✅ Add this import
+import { Suspense } from "react";
+import ClientNav from "@/components/ClientNav";
 
 export const metadata = {
   title: "Ghost Stock Killer",
@@ -12,25 +12,56 @@ export default function RootLayout({ children }) {
   return (
     <html lang="en">
       <head>
-        {/* ✅ Load App Bridge from Shopify’s CDN FIRST */}
-        <Script
-          id="shopify-app-bridge-cdn"
-          src="https://cdn.shopify.com/shopifycloud/app-bridge.js"
-          strategy="beforeInteractive"
+        {/* (optional but harmless) lets some builds auto-read the key */}
+        <meta
+          name="shopify-api-key"
+          content={process.env.NEXT_PUBLIC_SHOPIFY_API_KEY || "5860dca7a3c5d0818a384115d221179a"}
+        />
+
+        {/* MUST be plain (no async/defer/module) */}
+        <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
+
+        {/* ✅ Universal bootstrap: picks the right global, creates app once, and stores it */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              (function () {
+                try {
+                  var qs = new URLSearchParams(window.location.search);
+                  var host = qs.get('host');
+
+                  // fallback to cookie if middleware already stored it
+                  if (!host) {
+                    var m = document.cookie.match(/(?:^|;\\s*)shopifyHost=([^;]+)/);
+                    if (m) host = m[1];
+                  }
+                  if (!host) return;
+
+                  var createApp =
+                    (window.shopify && window.shopify.createApp) ||
+                    (window.appBridge && window.appBridge.createApp) ||
+                    (window["app-bridge"] && window["app-bridge"].default) ||
+                    null;
+
+                  if (!createApp) return;
+                  if (!window.__SHOPIFY_APP__) {
+                    window.__SHOPIFY_APP__ = createApp({
+                      apiKey: "${process.env.NEXT_PUBLIC_SHOPIFY_API_KEY || "5860dca7a3c5d0818a384115d221179a"}",
+                      host: host,
+                      forceRedirect: true
+                    });
+                  }
+                } catch (e) {}
+              })();
+            `,
+          }}
         />
       </head>
+
       <body className="bg-gray-900 text-white min-h-screen">
-        <nav className="bg-gray-800 text-white px-6 py-4 flex items-center justify-between">
-          <h1 className="text-xl font-bold">
-            <Link href="/">Ghost Stock Killer</Link>
-          </h1>
-          <div className="flex gap-4 text-sm items-center">
-            <Link href="/" className="hover:text-green-400">Home</Link>
-            <Link href="/dashboard" className="hover:text-green-400">Dashboard</Link>
-            <Link href="/settings" className="hover:text-green-400">Settings</Link>
-            <a href="/#pricing" className="hover:text-green-400">Pricing</a>
-          </div>
-        </nav>
+        <Suspense fallback={null}>
+          <ClientNav />
+        </Suspense>
         {children}
       </body>
     </html>
