@@ -150,27 +150,17 @@ export default function SettingsPage() {
 
 async function goShopifyManage() {
   try {
-    setBillingBusy(true);
-    // init (reuse if you already do this earlier in the component)
-    const host = new URLSearchParams(window.location.search).get("host");
-    if (!host) throw new Error("Missing host param");
-
-    let app = window.__SHOPIFY_APP__;
-    if (!app) {
-      app = createApp({ apiKey: "5860dca7a3c5d0818a384115d221179a", host, forceRedirect: true });
-      window.__SHOPIFY_APP__ = app;
-    }
-
+    const app = getApp();
+    if (!app) throw new Error("Missing host/App Bridge context");
     const redirect = Redirect.create(app);
-    // This opens Admin → Settings → Billing inside the embedded app
+    // Opens Shopify Admin → Settings → Billing
     redirect.dispatch(Redirect.Action.ADMIN_PATH, "/settings/billing");
   } catch (e) {
     console.error(e);
-    notify("Could not open Shopify billing");
-  } finally {
-    setBillingBusy(false);
+    alert("Could not open Shopify billing");
   }
 }
+
 
   // ----------------------------------------------------
 
