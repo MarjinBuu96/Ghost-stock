@@ -4,7 +4,6 @@ import useSWR from "swr";
 import { useEffect, useState } from "react";
 import { fetcher } from "@/lib/fetcher";
 
-
 export default function SettingsPage() {
   // Shopify connect form
   const [shop, setShop] = useState("");
@@ -18,13 +17,12 @@ export default function SettingsPage() {
   const { data, error, isLoading, mutate } = useSWR("/api/settings", fetcher);
   const settings = data?.settings || {};
 
-  // Plan handling (plan comes from your userSettings, updated by your Shopify billing flow)
+  // ---- Plans: starter / pro only ----
   const planRaw = String(settings?.plan || "starter").toLowerCase();
-  const normalizedPlan = ["free", "starter", "pro", "enterprise"].includes(planRaw)
-    ? planRaw
-    : "starter";
+  const normalizedPlan = ["starter", "pro"].includes(planRaw) ? planRaw : "starter";
   const isStarter = normalizedPlan === "starter";
-  const canUseIntegrations = normalizedPlan === "pro" || normalizedPlan === "enterprise";
+  const canUseIntegrations = normalizedPlan === "pro";
+  // -----------------------------------
 
   // Form state (explicit save)
   const [slackUrl, setSlackUrl] = useState("");
@@ -40,34 +38,25 @@ export default function SettingsPage() {
     setNotificationEmail(settings?.notificationEmail || "");
   }, [settings?.slackWebhookUrl, settings?.notificationEmail]);
 
-useEffect(() => {
-  const params = new URLSearchParams(window.location.search);
-  const chargeId = params.get("charge_id");
-  const upgraded = params.get("upgraded");
-  const billingError = params.get("billing");
+  // Handle Shopify billing return URL params (optional)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const chargeId = params.get("charge_id");
+    const upgraded = params.get("upgraded");
+    const billingError = params.get("billing");
 
-  console.log("🔍 charge_id from URL:", chargeId);
+    if (chargeId) {
+      fetch(`/api/shopify/billing/confirm?charge_id=${chargeId}`, { method: "GET" })
+        .then(() => {
+          mutate(); // Refresh settings
+          window.history.replaceState({}, "", window.location.pathname); // Clean URL
+        })
+        .catch((err) => console.error("Billing confirm failed:", err));
+    }
 
-  if (chargeId) {
-    fetch(`/api/shopify/billing/confirm?charge_id=${chargeId}`, {
-      method: "GET",
-    })
-      .then((res) => {
-        console.log("✅ Billing confirm response:", res.status);
-        mutate(); // Refresh settings
-        window.history.replaceState({}, "", window.location.pathname); // Clean URL
-      })
-      .catch((err) => {
-        console.error("❌ Billing confirm failed:", err);
-      });
-  }
-
-  if (upgraded) notify("Your subscription has been upgraded 🎉");
-  if (billingError) notify("Billing error: " + billingError);
-}, []);
-
-
-
+    if (upgraded) notify("Your subscription has been upgraded 🎉");
+    if (billingError) notify("Billing error: " + billingError);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const currency = settings?.currency || "GBP";
 
@@ -131,52 +120,47 @@ useEffect(() => {
     }
   }
 
-  // ---- Shopify Billing actions ----
-async function goShopifyUpgrade(plan) {
-  try {
-    setBillingBusy(true);
+  // ---- Shopify Billing actions (starter/pro only) ----
+  async function goShopifyUpgrade(plan) {
+    try {
+      setBillingBusy(true);
+      const safePlan = plan === "pro" ? "pro" : "starter";
 
-    // 👇 Grab host from the current URL
-    const host = new URLSearchParams(window.location.search).get("host");
+      // Include host if present (embedded apps)
+      const host = new URLSearchParams(window.location.search).get("host");
+      const res = await fetch(`/api/shopify/billing/upgrade?host=${host || ""}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ plan: safePlan }),
+      });
 
-    // 👇 Pass host to your backend route
-    const res = await fetch(`/api/shopify/billing/upgrade?host=${host}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ plan }), // "starter" | "pro" | "enterprise"
-    });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json?.confirmationUrl) throw new Error(json?.error || "Upgrade failed");
 
-    const json = await res.json().catch(() => ({}));
-    if (!res.ok || !json?.confirmationUrl) throw new Error(json?.error || "Upgrade failed");
-
-    // ✅ Open billing confirmation in a new tab (not iframe)
-    window.open(json.confirmationUrl, "_blank", "noopener,noreferrer");
-  } catch {
-    notify("Could not start Shopify upgrade");
-    setBillingBusy(false);
+      // Open Shopify billing confirmation outside iframe
+      window.open(json.confirmationUrl, "_blank", "noopener,noreferrer");
+    } catch {
+      notify("Could not start Shopify upgrade");
+      setBillingBusy(false);
+    }
   }
-}
-
 
   async function goShopifyManage() {
     try {
       setBillingBusy(true);
-      // Optional: implement /api/shopify/billing/manage to return a management URL or your own manage page
       const res = await fetch("/api/shopify/billing/manage", { method: "POST" });
       const json = await res.json().catch(() => ({}));
       if (!res.ok || !json?.url) throw new Error(json?.error || "Manage failed");
       window.open(json.url, "_blank");
-
     } catch {
       notify("Could not open Shopify billing");
       setBillingBusy(false);
     }
   }
-  // ---------------------------------
+  // ----------------------------------------------------
 
-  const showUpgradeStarter = normalizedPlan !== "starter";
-  const showUpgradePro = normalizedPlan !== "pro";
-  const showUpgradeEnterprise = normalizedPlan !== "enterprise";
+  const showUpgradeStarter = normalizedPlan === "pro";
+  const showUpgradePro = normalizedPlan === "starter";
 
   return (
     <main className="min-h-screen px-6 py-10 max-w-3xl mx-auto text-white">
@@ -225,6 +209,7 @@ async function goShopifyUpgrade(plan) {
               Plan changes are handled inside Shopify (you’ll see a standard approval screen).
             </p>
           </div>
+
           <div className="flex flex-wrap gap-2">
             {showUpgradeStarter && (
               <button
@@ -244,15 +229,6 @@ async function goShopifyUpgrade(plan) {
                 Upgrade to Pro
               </button>
             )}
-            {showUpgradeEnterprise && (
-              <button
-                onClick={() => goShopifyUpgrade("enterprise")}
-                disabled={billingBusy}
-                className="rounded bg-purple-500 hover:bg-purple-600 text-black px-3 py-2 text-sm font-semibold disabled:opacity-60"
-              >
-                Upgrade to Enterprise
-              </button>
-            )}
 
             {/* Optional: only keep if you've implemented /api/shopify/billing/manage */}
             <button
@@ -267,12 +243,11 @@ async function goShopifyUpgrade(plan) {
 
         <ul className="mt-4 text-sm text-gray-300 list-disc pl-5 space-y-1">
           <li><span className="font-medium">Starter:</span> Manual scans, dashboard KPIs, CSV export.</li>
-          <li><span className="font-medium">Pro:</span> Auto-scans, Slack/Teams, multi-store (basic).</li>
-          <li><span className="font-medium">Enterprise:</span> Unified dashboards, webhooks/Zapier, SSO.</li>
+          <li><span className="font-medium">Pro:</span> Auto-scans, Slack/Email alerts, priority support.</li>
         </ul>
       </section>
 
-      {/* Integrations — kept visible; locked on Starter */}
+      {/* Integrations — visible; locked on Starter */}
       <section className="mb-8 rounded border border-gray-700 bg-gray-900 p-5">
         <h3 className="text-xl font-semibold">Integrations</h3>
         <p className="text-sm text-gray-400">Receive alerts via Slack or Email.</p>
@@ -316,8 +291,7 @@ async function goShopifyUpgrade(plan) {
           {!canUseIntegrations && (
             <div className="text-xs text-gray-400">
               Upgrade to{" "}
-              <button className="underline" onClick={() => goShopifyUpgrade("pro")}>Pro</button> or{" "}
-              <button className="underline" onClick={() => goShopifyUpgrade("enterprise")}>Enterprise</button>{" "}
+              <button className="underline" onClick={() => goShopifyUpgrade("pro")}>Pro</button>{" "}
               to enable Slack alerts.
             </div>
           )}
@@ -362,8 +336,7 @@ async function goShopifyUpgrade(plan) {
           {!canUseIntegrations && (
             <div className="text-xs text-gray-400">
               Upgrade to{" "}
-              <button className="underline" onClick={() => goShopifyUpgrade("pro")}>Pro</button> or{" "}
-              <button className="underline" onClick={() => goShopifyUpgrade("enterprise")}>Enterprise</button>{" "}
+              <button className="underline" onClick={() => goShopifyUpgrade("pro")}>Pro</button>{" "}
               to enable email alerts.
             </div>
           )}
