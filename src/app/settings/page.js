@@ -3,6 +3,9 @@
 import useSWR from "swr";
 import { useEffect, useState } from "react";
 import { fetcher } from "@/lib/fetcher";
+import createApp from "@shopify/app-bridge";
+import { Redirect } from "@shopify/app-bridge/actions";
+
 
 export default function SettingsPage() {
   // Shopify connect form
@@ -145,18 +148,30 @@ export default function SettingsPage() {
     }
   }
 
-  async function goShopifyManage() {
-    try {
-      setBillingBusy(true);
-      const res = await fetch("/api/shopify/billing/manage", { method: "POST" });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok || !json?.url) throw new Error(json?.error || "Manage failed");
-      window.open(json.url, "_blank");
-    } catch {
-      notify("Could not open Shopify billing");
-      setBillingBusy(false);
+async function goShopifyManage() {
+  try {
+    setBillingBusy(true);
+    // init (reuse if you already do this earlier in the component)
+    const host = new URLSearchParams(window.location.search).get("host");
+    if (!host) throw new Error("Missing host param");
+
+    let app = window.__SHOPIFY_APP__;
+    if (!app) {
+      app = createApp({ apiKey: "5860dca7a3c5d0818a384115d221179a", host, forceRedirect: true });
+      window.__SHOPIFY_APP__ = app;
     }
+
+    const redirect = Redirect.create(app);
+    // This opens Admin → Settings → Billing inside the embedded app
+    redirect.dispatch(Redirect.Action.ADMIN_PATH, "/settings/billing");
+  } catch (e) {
+    console.error(e);
+    notify("Could not open Shopify billing");
+  } finally {
+    setBillingBusy(false);
   }
+}
+
   // ----------------------------------------------------
 
   const showUpgradeStarter = normalizedPlan === "pro";
