@@ -1,39 +1,38 @@
 "use client";
 
 import useSWR from "swr";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { fetcher } from "@/lib/fetcher";
-import createApp from "@shopify/app-bridge";
-import { Redirect } from "@shopify/app-bridge/actions";
-
-// ---- small helper for App Bridge ----
-function getApp() {
-  if (typeof window === "undefined") return null;
-  const host = new URLSearchParams(window.location.search).get("host");
-  if (!host) return null;
-  if (!window.__SHOPIFY_APP__) {
-    window.__SHOPIFY_APP__ = createApp({
-      apiKey: "5860dca7a3c5d0818a384115d221179a",
-      host,
-      forceRedirect: true,
-    });
-  }
-  return window.__SHOPIFY_APP__;
-}
 
 export default function SettingsPage() {
-  // Embedded?
-  const embedded = useMemo(() => {
-    if (typeof window === "undefined") return false;
-    return !!new URLSearchParams(window.location.search).get("host");
-  }, []);
+  // --- App Bridge host detection (URL first, cookie fallback) ---
+  const [host, setHost] = useState(null);
+  const isEmbedded = !!host;
 
-  // Shopify connect form (only for non-embedded/dev)
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const urlHost = params.get("host");
+    const cookieHost =
+      document.cookie.match(/(?:^|;\s*)shopifyHost=([^;]+)/)?.[1] || null;
+    const h = urlHost || cookieHost || null;
+    setHost(h);
+
+    // Persist host so deep-links keep working after navigation
+    if (urlHost) {
+      document.cookie = `shopifyHost=${urlHost}; path=/; SameSite=None; Secure`;
+    }
+  }, []);
+  // ---------------------------------------------------------------
+
+  // Shopify connect form (only shown when NOT embedded)
   const [shop, setShop] = useState("");
   const startInstall = (e) => {
     e.preventDefault();
     if (!shop) return;
-    window.location.href = `/api/shopify/install?shop=${encodeURIComponent(shop)}`;
+    window.location.href = `/api/shopify/install?shop=${encodeURIComponent(
+      shop
+    )}`;
   };
 
   // Load settings
@@ -54,12 +53,13 @@ export default function SettingsPage() {
   const [billingBusy, setBillingBusy] = useState(false);
   const [toast, setToast] = useState("");
 
+  // Hydrate form fields when settings load
   useEffect(() => {
     setSlackUrl(settings?.slackWebhookUrl || "");
     setNotificationEmail(settings?.notificationEmail || "");
   }, [settings?.slackWebhookUrl, settings?.notificationEmail]);
 
-  // Handle Shopify billing return params (optional)
+  // Handle Shopify billing return URL params (optional)
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const chargeId = params.get("charge_id");
@@ -69,16 +69,15 @@ export default function SettingsPage() {
     if (chargeId) {
       fetch(`/api/shopify/billing/confirm?charge_id=${chargeId}`, { method: "GET" })
         .then(() => {
-          mutate();
-          window.history.replaceState({}, "", window.location.pathname);
+          mutate(); // Refresh settings
+          window.history.replaceState({}, "", window.location.pathname); // Clean URL
         })
         .catch((err) => console.error("Billing confirm failed:", err));
     }
 
-    if (upgraded) notify("Your subscription has been upgraded 🎉");
+    if (upgraded) notify("Your subscription has been updated 🎉");
     if (billingError) notify("Billing error: " + billingError);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const currency = settings?.currency || "GBP";
 
@@ -142,40 +141,24 @@ export default function SettingsPage() {
     }
   }
 
-  // Billing actions
+  // Shopify Billing actions (starter/pro only)
   async function goShopifyUpgrade(plan) {
     try {
       setBillingBusy(true);
       const safePlan = plan === "pro" ? "pro" : "starter";
-      const host = new URLSearchParams(window.location.search).get("host") || "";
-      const res = await fetch(`/api/shopify/billing/upgrade?host=${host}`, {
+      const res = await fetch(`/api/shopify/billing/upgrade?host=${host || ""}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ plan: safePlan }),
       });
+
       const json = await res.json().catch(() => ({}));
       if (!res.ok || !json?.confirmationUrl) throw new Error(json?.error || "Upgrade failed");
-      // open outside iframe
-      window.open(json.confirmationUrl, "_blank", "noopener,noreferrer");
-    } catch (e) {
-      console.error(e);
-      notify("Could not start Shopify upgrade");
-    } finally {
-      setBillingBusy(false);
-    }
-  }
 
-  async function goShopifyManage() {
-    try {
-      setBillingBusy(true);
-      const app = getApp();
-      if (!app) throw new Error("Missing host/App Bridge context");
-      const redirect = Redirect.create(app);
-      // Shopify Admin → Settings → Billing (embedded safe)
-      redirect.dispatch(Redirect.Action.ADMIN_PATH, "/settings/billing");
-    } catch (e) {
-      console.error(e);
-      notify("Could not open Shopify billing");
+      // Open Shopify billing confirmation outside iframe
+      window.open(json.confirmationUrl, "_blank", "noopener,noreferrer");
+    } catch {
+      notify("Could not start Shopify upgrade");
     } finally {
       setBillingBusy(false);
     }
@@ -197,11 +180,13 @@ export default function SettingsPage() {
         </div>
       )}
 
-      {/* Shopify connection – hidden when embedded */}
-      {!embedded && (
+      {/* Shopify connection — HIDDEN when embedded (host present) */}
+      {!isEmbedded && (
         <section className="bg-gray-800 p-6 rounded space-y-4 mb-8 border border-gray-700">
           <h3 className="text-xl font-semibold">Shopify</h3>
-          <p className="text-sm text-gray-400">Connect your Shopify store to enable live scans and alerts.</p>
+          <p className="text-sm text-gray-400">
+            Connect your Shopify store to enable live scans and alerts.
+          </p>
           <form onSubmit={startInstall} className="space-y-3">
             <label className="block text-sm" htmlFor="shop-input">
               Shop domain (e.g. <span className="opacity-80">my-store.myshopify.com</span>)
@@ -253,14 +238,6 @@ export default function SettingsPage() {
                 Upgrade to Pro
               </button>
             )}
-
-            <button
-              onClick={goShopifyManage}
-              disabled={billingBusy}
-              className="rounded bg-gray-700 hover:bg-gray-600 px-3 py-2 text-sm font-semibold disabled:opacity-60"
-            >
-              Manage Plan
-            </button>
           </div>
         </div>
 
@@ -270,7 +247,7 @@ export default function SettingsPage() {
         </ul>
       </section>
 
-      {/* Integrations */}
+      {/* Integrations — visible; locked on Starter */}
       <section className="mb-8 rounded border border-gray-700 bg-gray-900 p-5">
         <h3 className="text-xl font-semibold">Integrations</h3>
         <p className="text-sm text-gray-400">Receive alerts via Slack or Email.</p>
@@ -394,10 +371,11 @@ export default function SettingsPage() {
         </p>
       </section>
 
+      {/* Debug */}
       <details className="mt-8">
         <summary className="cursor-pointer text-sm text-gray-400">Debug</summary>
         <pre className="mt-2 text-xs text-gray-300 bg-gray-800 rounded p-3 overflow-auto">
-{JSON.stringify({ isLoading, settings, normalizedPlan, slackUrl, notificationEmail, embedded }, null, 2)}
+{JSON.stringify({ isLoading, settings, normalizedPlan, slackUrl, notificationEmail, host, isEmbedded }, null, 2)}
         </pre>
       </details>
     </main>
