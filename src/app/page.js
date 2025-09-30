@@ -48,7 +48,7 @@ export default function Home() {
         <div className="grid md:grid-cols-3 gap-8">
           <div className="bg-gray-800 p-6 rounded shadow">
             <h4 className="text-xl font-semibold mb-4">Starter</h4>
-            <p className="text-green-400 text-2xl font-bold mb-4">FREE/mo</p>
+            <p className="text-green-400 text-2xl font-bold mb-4">FREE</p>
             <p className="mb-6">3 Manual scans per week, Shopify integration</p>
             <a href="#demo" className="bg-green-500 hover:bg-green-600 px-4 py-2 rounded text-black font-semibold inline-block">Get Started</a>
           </div>
