@@ -20,7 +20,7 @@ export default function StockDashboardMock() {
           </div>
           <div className="bg-gray-900/50 p-4 rounded-lg">
             <p className="text-sm text-gray-400">At-Risk Revenue</p>
-            <p className="text-3xl font-bold text-yellow-300">$4,820</p>
+            <p className="text-3xl font-bold text-yellow-300">£4,820</p>
           </div>
           <div className="bg-gray-900/50 p-4 rounded-lg">
             <p className="text-sm text-gray-400">Data Confidence</p>
