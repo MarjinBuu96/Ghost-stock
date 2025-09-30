@@ -1,10 +1,9 @@
-// src/middleware.ts
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 export const config = {
-  // don’t run on API, next assets, static files, etc.
-  matcher: ["/((?!api|_next|favicon.ico|.*\\.(png|jpg|jpeg|gif|svg|webp|ico|txt)).*)"],
+  // Match all paths except API and Next.js internals
+  matcher: ["/((?!api|_next|favicon\\.ico).*)"],
 };
 
 const PROTECTED_PATHS = ["/dashboard", "/settings"]; // add more if needed
@@ -12,6 +11,11 @@ const PROTECTED_PATHS = ["/dashboard", "/settings"]; // add more if needed
 export function middleware(req: NextRequest) {
   const url = req.nextUrl;
   const res = NextResponse.next();
+
+  // ---------- Skip static assets ----------
+  if (url.pathname.match(/\.(png|jpg|jpeg|gif|svg|webp|ico|txt)$/)) {
+    return res;
+  }
 
   // ---------- Security headers (embedded app) ----------
   const csp = [
@@ -29,17 +33,17 @@ export function middleware(req: NextRequest) {
   // ---------- Read host/shop from request ----------
   const qHost = url.searchParams.get("host") || "";
   const referrer = req.headers.get("referer") || "";
-  const hdrShop = req.headers.get("x-shopify-shop-domain") || ""; // set by Shopify on embedded requests
+  const hdrShop = req.headers.get("x-shopify-shop-domain") || "";
   const cookieHost = req.cookies.get("shopifyHost")?.value || "";
   const cookieShop = req.cookies.get("shopify_shop")?.value || "";
 
-  // ---------- Persist cookies when values arrive ----------
+  // ---------- Persist cookies ----------
   const cookieInit = {
     path: "/",
-    httpOnly: false, // must be readable by client JS
+    httpOnly: false,
     secure: true,
     sameSite: "none" as const,
-    maxAge: 60 * 60 * 24 * 365, // 1 year
+    maxAge: 60 * 60 * 24 * 365,
   };
 
   if (qHost && qHost !== cookieHost) {
@@ -49,9 +53,8 @@ export function middleware(req: NextRequest) {
     res.cookies.set("shopify_shop", hdrShop.toLowerCase(), cookieInit);
   }
 
-  // ---------- Preserve `host` across client nav ----------
+  // ---------- Preserve `host` ----------
   if (!qHost) {
-    // try to recover host from referrer or cookie
     const refHost = (() => {
       try {
         const r = new URL(referrer);
@@ -69,9 +72,8 @@ export function middleware(req: NextRequest) {
     }
   }
 
-  // ---------- Block access to protected pages outside embed ----------
+  // ---------- Block protected pages ----------
   const isProtected = PROTECTED_PATHS.some((p) => url.pathname.startsWith(p));
-
   const looksEmbedded =
     !!qHost ||
     referrer.includes("admin.shopify.com") ||
@@ -79,8 +81,6 @@ export function middleware(req: NextRequest) {
     !!cookieHost;
 
   if (isProtected && !looksEmbedded) {
-    // If you have a marketing homepage, send there. Otherwise show a minimal message.
-    // return NextResponse.redirect(new URL("/", url));
     return new NextResponse(
       `<!doctype html>
 <html><head><meta charset="utf-8"><title>Ghost Stock</title></head>
