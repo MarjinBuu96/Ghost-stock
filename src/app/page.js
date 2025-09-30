@@ -27,7 +27,7 @@ export default function Home() {
           <div className="bg-gray-700 p-6 rounded shadow">
             <span className="text-green-400 text-4xl">🔗</span>
             <h4 className="text-xl font-semibold mt-4 mb-2">Connect Your Store</h4>
-            <p>Works with Shopify & WooCommerce in 2 clicks.</p>
+            <p>Works with Shopify 2 clicks.</p>
           </div>
           <div className="bg-gray-700 p-6 rounded shadow">
             <span className="text-green-400 text-4xl">📊</span>
@@ -37,7 +37,7 @@ export default function Home() {
           <div className="bg-gray-700 p-6 rounded shadow">
             <span className="text-green-400 text-4xl">🔮</span>
             <h4 className="text-xl font-semibold mt-4 mb-2">Predict Problems</h4>
-            <p>AI forecasts when errors will happen so you can fix them before they hurt sales.</p>
+            <p> Forecasts when errors will happen so you can fix them before they hurt sales.</p>
           </div>
         </div>
       </section>
@@ -48,22 +48,17 @@ export default function Home() {
         <div className="grid md:grid-cols-3 gap-8">
           <div className="bg-gray-800 p-6 rounded shadow">
             <h4 className="text-xl font-semibold mb-4">Starter</h4>
-            <p className="text-green-400 text-2xl font-bold mb-4">$29/mo</p>
-            <p className="mb-6">Unlimited scans, Shopify/WooCommerce integration</p>
+            <p className="text-green-400 text-2xl font-bold mb-4">FREE/mo</p>
+            <p className="mb-6">3 Manual scans per week, Shopify integration</p>
             <a href="#demo" className="bg-green-500 hover:bg-green-600 px-4 py-2 rounded text-black font-semibold inline-block">Get Started</a>
           </div>
           <div className="bg-gray-800 p-6 rounded shadow border border-green-500">
             <h4 className="text-xl font-semibold mb-4">Pro</h4>
-            <p className="text-green-400 text-2xl font-bold mb-4">$49/mo</p>
-            <p className="mb-6">Multi-location tracking + ghost stock prediction</p>
+            <p className="text-green-400 text-2xl font-bold mb-4">£29/mo</p>
+            <p className="mb-6">Multi-location tracking + ghost stock prediction, Auto Daily scans & more</p>
             <a href="#demo" className="bg-green-500 hover:bg-green-600 px-4 py-2 rounded text-black font-semibold inline-block">Get Started</a>
           </div>
-          <div className="bg-gray-800 p-6 rounded shadow">
-            <h4 className="text-xl font-semibold mb-4">Enterprise</h4>
-            <p className="text-green-400 text-2xl font-bold mb-4">Custom</p>
-            <p className="mb-6">API & advanced reporting</p>
-            <a href="#demo" className="bg-green-500 hover:bg-green-600 px-4 py-2 rounded text-black font-semibold inline-block">Contact Sales</a>
-          </div>
+          
         </div>
       </section>
 
