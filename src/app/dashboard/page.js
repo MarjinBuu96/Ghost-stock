@@ -78,12 +78,18 @@ function DashboardInner() {
           const token = await fetchSessionToken(app);
           const headers = new Headers(init.headers || {});
           headers.set("Authorization", `Bearer ${token}`);
+
+          // also forward shop domain (defensive)
+          const cookieShop = document.cookie.match(/(?:^|;\s*)shopify_shop=([^;]+)/)?.[1] || "";
+          if (cookieShop) headers.set("X-Shopify-Shop-Domain", cookieShop);
+
           return originalFetch(input, { ...init, headers });
         }
       } catch {}
       return originalFetch(input, init);
     };
 
+    // ✅ cleanup
     return () => {
       window.fetch = originalFetch;
     };
@@ -138,7 +144,7 @@ function DashboardInner() {
   const currency = settingsData?.settings?.currency ?? "USD";
   const plan = String(settingsData?.settings?.plan || "starter").toLowerCase();
   const isStarter = plan === "starter";
-  const canUseIntegrations = plan === "pro"; // ⬅️ Pro-only gating
+  const canUseIntegrations = plan === "pro";
   const slackConfigured = !!settingsData?.settings?.slackWebhookUrl;
   const emailConfigured = !!settingsData?.settings?.notificationEmail;
 
@@ -266,7 +272,7 @@ function DashboardInner() {
       const res = await fetch("/api/shopify/billing/upgrade", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ plan: planName }), // "pro" (and optional "pro_annual")
+        body: JSON.stringify({ plan: planName }),
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok || !json?.confirmationUrl) throw new Error(json?.error || "Upgrade failed");
@@ -275,7 +281,6 @@ function DashboardInner() {
       if (!app) throw new Error("App Bridge not initialized");
 
       const redirect = Redirect.create(app);
-      // Convert full Admin URL to ADMIN_PATH for embedded redirect
       redirect.dispatch(
         Redirect.Action.ADMIN_PATH,
         json.confirmationUrl.replace("https://admin.shopify.com", "")
@@ -285,6 +290,43 @@ function DashboardInner() {
       alert("Could not open the Shopify upgrade page.");
     }
   }
+
+  // ✅ One-time autorun scan after first embed and store present
+  useEffect(() => {
+    if (!hasStore) return;
+    if (hasScanned) return;
+    if (isScanning) return;
+
+    const app = appRef.current;
+    if (!app) return;
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        setIsScanning(true);
+        const token = await fetchSessionToken(app);
+        const res = await fetch("/api/scan", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!cancelled && res.ok) {
+          setHasScanned(true);
+          try { localStorage.setItem("hasScanned", "1"); } catch {}
+          await Promise.all([mutate(), invMutate(), mutateKpis()]);
+        }
+      } catch (e) {
+        console.warn("autorun scan failed:", e);
+      } finally {
+        if (!cancelled) setIsScanning(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasStore]);
 
   // Banners
   const showRunScanBanner = hasStore && !isScanning && !hasScanned;

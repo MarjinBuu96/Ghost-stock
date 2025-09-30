@@ -1,14 +1,34 @@
 "use client";
 
 import useSWR from "swr";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { fetcher } from "@/lib/fetcher";
 import createApp from "@shopify/app-bridge";
 import { Redirect } from "@shopify/app-bridge/actions";
 
+// ---- small helper for App Bridge ----
+function getApp() {
+  if (typeof window === "undefined") return null;
+  const host = new URLSearchParams(window.location.search).get("host");
+  if (!host) return null;
+  if (!window.__SHOPIFY_APP__) {
+    window.__SHOPIFY_APP__ = createApp({
+      apiKey: "5860dca7a3c5d0818a384115d221179a",
+      host,
+      forceRedirect: true,
+    });
+  }
+  return window.__SHOPIFY_APP__;
+}
 
 export default function SettingsPage() {
-  // Shopify connect form
+  // Embedded?
+  const embedded = useMemo(() => {
+    if (typeof window === "undefined") return false;
+    return !!new URLSearchParams(window.location.search).get("host");
+  }, []);
+
+  // Shopify connect form (only for non-embedded/dev)
   const [shop, setShop] = useState("");
   const startInstall = (e) => {
     e.preventDefault();
@@ -20,14 +40,13 @@ export default function SettingsPage() {
   const { data, error, isLoading, mutate } = useSWR("/api/settings", fetcher);
   const settings = data?.settings || {};
 
-  // ---- Plans: starter / pro only ----
+  // Plans: starter / pro only
   const planRaw = String(settings?.plan || "starter").toLowerCase();
   const normalizedPlan = ["starter", "pro"].includes(planRaw) ? planRaw : "starter";
   const isStarter = normalizedPlan === "starter";
   const canUseIntegrations = normalizedPlan === "pro";
-  // -----------------------------------
 
-  // Form state (explicit save)
+  // Form state
   const [slackUrl, setSlackUrl] = useState("");
   const [notificationEmail, setNotificationEmail] = useState("");
   const [currencySaving, setCurrencySaving] = useState(false);
@@ -35,13 +54,12 @@ export default function SettingsPage() {
   const [billingBusy, setBillingBusy] = useState(false);
   const [toast, setToast] = useState("");
 
-  // Hydrate form fields when settings load
   useEffect(() => {
     setSlackUrl(settings?.slackWebhookUrl || "");
     setNotificationEmail(settings?.notificationEmail || "");
   }, [settings?.slackWebhookUrl, settings?.notificationEmail]);
 
-  // Handle Shopify billing return URL params (optional)
+  // Handle Shopify billing return params (optional)
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const chargeId = params.get("charge_id");
@@ -51,15 +69,16 @@ export default function SettingsPage() {
     if (chargeId) {
       fetch(`/api/shopify/billing/confirm?charge_id=${chargeId}`, { method: "GET" })
         .then(() => {
-          mutate(); // Refresh settings
-          window.history.replaceState({}, "", window.location.pathname); // Clean URL
+          mutate();
+          window.history.replaceState({}, "", window.location.pathname);
         })
         .catch((err) => console.error("Billing confirm failed:", err));
     }
 
     if (upgraded) notify("Your subscription has been upgraded 🎉");
     if (billingError) notify("Billing error: " + billingError);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const currency = settings?.currency || "GBP";
 
@@ -123,46 +142,44 @@ export default function SettingsPage() {
     }
   }
 
-  // ---- Shopify Billing actions (starter/pro only) ----
+  // Billing actions
   async function goShopifyUpgrade(plan) {
     try {
       setBillingBusy(true);
       const safePlan = plan === "pro" ? "pro" : "starter";
-
-      // Include host if present (embedded apps)
-      const host = new URLSearchParams(window.location.search).get("host");
-      const res = await fetch(`/api/shopify/billing/upgrade?host=${host || ""}`, {
+      const host = new URLSearchParams(window.location.search).get("host") || "";
+      const res = await fetch(`/api/shopify/billing/upgrade?host=${host}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ plan: safePlan }),
       });
-
       const json = await res.json().catch(() => ({}));
       if (!res.ok || !json?.confirmationUrl) throw new Error(json?.error || "Upgrade failed");
-
-      // Open Shopify billing confirmation outside iframe
+      // open outside iframe
       window.open(json.confirmationUrl, "_blank", "noopener,noreferrer");
-    } catch {
+    } catch (e) {
+      console.error(e);
       notify("Could not start Shopify upgrade");
+    } finally {
       setBillingBusy(false);
     }
   }
 
-async function goShopifyManage() {
-  try {
-    const app = getApp();
-    if (!app) throw new Error("Missing host/App Bridge context");
-    const redirect = Redirect.create(app);
-    // Opens Shopify Admin → Settings → Billing
-    redirect.dispatch(Redirect.Action.ADMIN_PATH, "/settings/billing");
-  } catch (e) {
-    console.error(e);
-    alert("Could not open Shopify billing");
+  async function goShopifyManage() {
+    try {
+      setBillingBusy(true);
+      const app = getApp();
+      if (!app) throw new Error("Missing host/App Bridge context");
+      const redirect = Redirect.create(app);
+      // Shopify Admin → Settings → Billing (embedded safe)
+      redirect.dispatch(Redirect.Action.ADMIN_PATH, "/settings/billing");
+    } catch (e) {
+      console.error(e);
+      notify("Could not open Shopify billing");
+    } finally {
+      setBillingBusy(false);
+    }
   }
-}
-
-
-  // ----------------------------------------------------
 
   const showUpgradeStarter = normalizedPlan === "pro";
   const showUpgradePro = normalizedPlan === "starter";
@@ -180,27 +197,29 @@ async function goShopifyManage() {
         </div>
       )}
 
-      {/* Shopify connection */}
-      <section className="bg-gray-800 p-6 rounded space-y-4 mb-8 border border-gray-700">
-        <h3 className="text-xl font-semibold">Shopify</h3>
-        <p className="text-sm text-gray-400">Connect your Shopify store to enable live scans and alerts.</p>
-        <form onSubmit={startInstall} className="space-y-3">
-          <label className="block text-sm" htmlFor="shop-input">
-            Shop domain (e.g. <span className="opacity-80">my-store.myshopify.com</span>)
-          </label>
-          <input
-            id="shop-input"
-            className="w-full px-3 py-2 rounded text-black"
-            placeholder="your-shop.myshopify.com"
-            value={shop}
-            onChange={(e) => setShop(e.target.value)}
-            required
-          />
-          <button className="bg-green-500 hover:bg-green-600 text-black font-semibold px-4 py-2 rounded">
-            Connect Shopify Store
-          </button>
-        </form>
-      </section>
+      {/* Shopify connection – hidden when embedded */}
+      {!embedded && (
+        <section className="bg-gray-800 p-6 rounded space-y-4 mb-8 border border-gray-700">
+          <h3 className="text-xl font-semibold">Shopify</h3>
+          <p className="text-sm text-gray-400">Connect your Shopify store to enable live scans and alerts.</p>
+          <form onSubmit={startInstall} className="space-y-3">
+            <label className="block text-sm" htmlFor="shop-input">
+              Shop domain (e.g. <span className="opacity-80">my-store.myshopify.com</span>)
+            </label>
+            <input
+              id="shop-input"
+              className="w-full px-3 py-2 rounded text-black"
+              placeholder="your-shop.myshopify.com"
+              value={shop}
+              onChange={(e) => setShop(e.target.value)}
+              required
+            />
+            <button className="bg-green-500 hover:bg-green-600 text-black font-semibold px-4 py-2 rounded">
+              Connect Shopify Store
+            </button>
+          </form>
+        </section>
+      )}
 
       {/* Billing via Shopify */}
       <section id="billing" className="mb-8 rounded border border-gray-700 bg-gray-900 p-5">
@@ -235,7 +254,6 @@ async function goShopifyManage() {
               </button>
             )}
 
-            {/* Optional: only keep if you've implemented /api/shopify/billing/manage */}
             <button
               onClick={goShopifyManage}
               disabled={billingBusy}
@@ -252,7 +270,7 @@ async function goShopifyManage() {
         </ul>
       </section>
 
-      {/* Integrations — visible; locked on Starter */}
+      {/* Integrations */}
       <section className="mb-8 rounded border border-gray-700 bg-gray-900 p-5">
         <h3 className="text-xl font-semibold">Integrations</h3>
         <p className="text-sm text-gray-400">Receive alerts via Slack or Email.</p>
@@ -376,11 +394,10 @@ async function goShopifyManage() {
         </p>
       </section>
 
-      {/* Debug */}
       <details className="mt-8">
         <summary className="cursor-pointer text-sm text-gray-400">Debug</summary>
         <pre className="mt-2 text-xs text-gray-300 bg-gray-800 rounded p-3 overflow-auto">
-{JSON.stringify({ isLoading, settings, normalizedPlan, slackUrl, notificationEmail }, null, 2)}
+{JSON.stringify({ isLoading, settings, normalizedPlan, slackUrl, notificationEmail, embedded }, null, 2)}
         </pre>
       </details>
     </main>
