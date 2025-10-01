@@ -1,15 +1,27 @@
 import crypto from "crypto";
 
-export function verifyOAuthQueryHmac(searchParams, hmacFromShop, secret) {
-  const sp = new URLSearchParams(searchParams.toString());
-  sp.delete("hmac");
+/**
+ * Verifies Shopify OAuth HMAC using query params and shared secret.
+ * @param {Object} query - Parsed query object (not URLSearchParams)
+ * @param {string} hmac - HMAC from Shopify
+ * @param {string} secret - Your Shopify API secret
+ * @returns {boolean}
+ */
+export function verifyOAuthQueryHmac(query, hmac, secret) {
+  const sortedParams = Object.entries(query)
+    .filter(([key]) => key !== "hmac" && key !== "signature")
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, value]) => `${key}=${Array.isArray(value) ? value.join(",") : value}`)
+    .join("&");
 
-  const msg = sp.toString(); // ✅ no decodeURIComponent
-
-  const digest = crypto
+  const generated = crypto
     .createHmac("sha256", secret)
-    .update(msg)
+    .update(sortedParams)
     .digest("hex");
 
-  return crypto.timingSafeEqual(Buffer.from(digest), Buffer.from(hmacFromShop));
+  const match = generated === hmac;
+  if (!match) {
+    console.warn("🔐 HMAC mismatch", { sortedParams, generated, provided: hmac });
+  }
+  return match;
 }
