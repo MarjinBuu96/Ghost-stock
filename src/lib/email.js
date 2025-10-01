@@ -1,5 +1,4 @@
-// server-only email helper that works with SMTP (nodemailer) if available.
-// If SMTP env isn’t set, it no-ops cleanly (so dev/prod won’t crash).
+// C:\Users\rapwr\ghost-stock\src\lib\email.js
 import 'server-only';
 
 const fromDefault =
@@ -11,31 +10,37 @@ export async function sendAlertEmail({ to, subject, html, text }) {
   if (!to) throw new Error('sendAlertEmail: missing "to"');
   if (!subject) throw new Error('sendAlertEmail: missing "subject"');
 
-  // Only attempt SMTP if configured
   const host = process.env.SMTP_HOST;
   if (!host) {
-    console.warn('[email] SMTP not configured, skipping send', {
-      to,
-      subject,
-    });
+    console.warn('[email] SMTP not configured, skipping send', { to, subject });
     return { ok: false, skipped: 'no_smtp' };
   }
 
-  // nodemailer must be in dependencies: `npm i nodemailer`
   const nodemailerMod = await import('nodemailer');
   const nodemailer = nodemailerMod.default || nodemailerMod;
 
+  const port = Number(process.env.SMTP_PORT || 587);
+  const secure = port === 465; // 587 => STARTTLS (secure:false)
+
   const transporter = nodemailer.createTransport({
     host,
-    port: Number(process.env.SMTP_PORT || 587),
-    secure: Boolean(process.env.SMTP_SECURE === 'true'), // false = STARTTLS
-    auth: (process.env.SMTP_USER || process.env.SMTP_PASS)
-      ? {
-          user: process.env.SMTP_USER,
-          pass: process.env.SMTP_PASS,
-        }
-      : undefined,
+    port,
+    secure,
+    auth: {
+      user: process.env.SMTP_USER, // e.g. 9853bc001@smtp-brevo.com
+      pass: process.env.SMTP_PASS, // Brevo SMTP key/password
+    },
+    // If you still see auth failing with AUTH PLAIN, uncomment:
+    // authMethod: "LOGIN",
   });
+
+  // Optional but helpful during setup
+  try {
+    await transporter.verify();
+  } catch (e) {
+    console.error('[email] transporter.verify failed:', e);
+    throw e;
+  }
 
   const info = await transporter.sendMail({
     from: fromDefault,
@@ -48,5 +53,4 @@ export async function sendAlertEmail({ to, subject, html, text }) {
   return { ok: true, id: info?.messageId || null };
 }
 
-// Optional alias for any older imports
 export const sendMail = sendAlertEmail;
