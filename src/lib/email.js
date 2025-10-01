@@ -22,17 +22,16 @@ export async function sendAlertEmail({ to, subject, html, text }) {
   const port = Number(process.env.SMTP_PORT || 587);
   const secure = port === 465; // 587 => STARTTLS (secure:false)
 
-  const transporter = nodemailer.createTransport({
-    host,
-    port,
-    secure,
-    auth: {
-      user: process.env.SMTP_USER, // e.g. 9853bc001@smtp-brevo.com
-      pass: process.env.SMTP_PASS, // Brevo SMTP key/password
-    },
-    // If you still see auth failing with AUTH PLAIN, uncomment:
-    // authMethod: "LOGIN",
-  });
+ const info = await transporter.sendMail({
+  from: fromDefault,
+  to,
+  subject,
+  text: text || undefined,
+  html: html || undefined,
+  replyTo: process.env.EMAIL_REPLY_TO || undefined,     // 👈 standard reply-to
+  bcc: process.env.EMAIL_BCC_AUDIT || undefined,        // 👈 you get BCC'd
+});
+
 
   // Optional but helpful during setup
   try {
