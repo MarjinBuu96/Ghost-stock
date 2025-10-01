@@ -3,6 +3,7 @@ import jwt from "jsonwebtoken";
 import { prisma } from "@/lib/prisma";
 
 const SHOP_COOKIE = "shopify_shop";
+const INVALID_TOKENS = ["", "reset_me", null];
 
 export async function POST(req) {
   try {
@@ -36,12 +37,13 @@ export async function POST(req) {
       });
       console.log("🆕 Store created from session token:", shop);
     } else {
-      if (!existing.accessToken) {
+      const isBadToken = INVALID_TOKENS.includes(existing.accessToken);
+      if (isBadToken) {
         await prisma.store.update({
           where: { shop },
-          data: { updatedAt: new Date() },
+          data: { accessToken: "", updatedAt: new Date() },
         });
-        console.log("🔄 Store updated (no access token yet):", shop);
+        console.log("🧹 Cleared invalid token for:", shop);
       } else {
         console.log("✅ Store already exists with access token:", shop);
       }
