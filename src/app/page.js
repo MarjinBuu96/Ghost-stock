@@ -2,8 +2,29 @@
 
 import StockDashboardMock from "@/components/StockDashboardMock";
 import BlogHeader from "@/components/BlogHeader";
+import { useCallback } from "react";
 
 export default function Home() {
+  // If we’re inside the Shopify admin iframe, force the top window to navigate
+  const openBlog = useCallback((e) => {
+    // always route to your own domain so it works with the Vercel rewrite
+    const url = `${window.location.origin}/blog`;
+
+    // if embedded (inside iframe), bust out to top to avoid Shopify’s iframe restrictions
+    if (typeof window !== "undefined" && window.top && window.top !== window.self) {
+      e.preventDefault();
+      try {
+        window.top.location.href = url;
+      } catch {
+        // as a fallback, open a new tab
+        window.open(url, "_blank", "noopener,noreferrer");
+      }
+      return;
+    }
+
+    // otherwise let the normal link work (client-side route)
+  }, []);
+
   return (
     <main className="px-6">
       {/* Hero */}
@@ -14,6 +35,7 @@ export default function Home() {
         <p className="text-lg text-gray-300 max-w-2xl mx-auto mb-8">
           Ghost inventory is killing your revenue and reputation. Our tool detects and predicts stock errors before they cost you money.
         </p>
+
         <div className="flex justify-center gap-4">
           <a
             href="#demo"
@@ -27,8 +49,11 @@ export default function Home() {
           >
             See How It Works
           </a>
+          {/* BLOG link – uses /blog so Vercel can proxy to Ghost(Pro) */}
           <a
             href="/blog"
+            onClick={openBlog}
+            rel="noopener noreferrer"
             className="border border-green-500 text-green-400 px-6 py-3 rounded hover:bg-gray-800"
           >
             Read the Blog
