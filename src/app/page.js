@@ -1,23 +1,47 @@
 "use client";
 
-
 import StockDashboardMock from "@/components/StockDashboardMock";
+import BlogHeader from "@/components/BlogHeader";
 
 export default function Home() {
   return (
     <main className="px-6">
       {/* Hero */}
       <section className="text-center py-16">
-        <h2 className="text-4xl md:text-5xl font-bold mb-4">Stop Selling Stock You Don’t Have</h2>
+        <h2 className="text-4xl md:text-5xl font-bold mb-4">
+          Stop Selling Stock You Don’t Have
+        </h2>
         <p className="text-lg text-gray-300 max-w-2xl mx-auto mb-8">
           Ghost inventory is killing your revenue and reputation. Our tool detects and predicts stock errors before they cost you money.
         </p>
         <div className="flex justify-center gap-4">
-          <a href="#demo" className="bg-green-500 hover:bg-green-600 px-6 py-3 rounded text-black font-semibold">Book a Demo</a>
-          <a href="#how" className="border border-gray-400 px-6 py-3 rounded hover:bg-gray-800">See How It Works</a>
+          <a
+            href="#demo"
+            className="bg-green-500 hover:bg-green-600 px-6 py-3 rounded text-black font-semibold"
+          >
+            Book a Demo
+          </a>
+          <a
+            href="#how"
+            className="border border-gray-400 px-6 py-3 rounded hover:bg-gray-800"
+          >
+            See How It Works
+          </a>
+          <a
+            href="/blog"
+            className="border border-green-500 text-green-400 px-6 py-3 rounded hover:bg-gray-800"
+          >
+            Read the Blog
+          </a>
         </div>
-        {/* Replace the old placeholder image with this live mock component */}
+
+        {/* Live mock */}
         <StockDashboardMock />
+      </section>
+
+      {/* Blog header (latest posts teaser) */}
+      <section className="py-10 max-w-5xl mx-auto">
+        <BlogHeader />
       </section>
 
       {/* How it works */}
@@ -27,7 +51,7 @@ export default function Home() {
           <div className="bg-gray-700 p-6 rounded shadow">
             <span className="text-green-400 text-4xl">🔗</span>
             <h4 className="text-xl font-semibold mt-4 mb-2">Connect Your Store</h4>
-            <p>Works with Shopify 2 clicks.</p>
+            <p>Works with Shopify — 2 clicks.</p>
           </div>
           <div className="bg-gray-700 p-6 rounded shadow">
             <span className="text-green-400 text-4xl">📊</span>
@@ -37,7 +61,7 @@ export default function Home() {
           <div className="bg-gray-700 p-6 rounded shadow">
             <span className="text-green-400 text-4xl">🔮</span>
             <h4 className="text-xl font-semibold mt-4 mb-2">Predict Problems</h4>
-            <p> Forecasts when errors will happen so you can fix them before they hurt sales.</p>
+            <p>Forecasts when errors will happen so you can fix them before they hurt sales.</p>
           </div>
         </div>
       </section>
@@ -49,16 +73,25 @@ export default function Home() {
           <div className="bg-gray-800 p-6 rounded shadow">
             <h4 className="text-xl font-semibold mb-4">Starter</h4>
             <p className="text-green-400 text-2xl font-bold mb-4">FREE</p>
-            <p className="mb-6">3 Manual scans per week, Shopify integration</p>
-            <a href="#demo" className="bg-green-500 hover:bg-green-600 px-4 py-2 rounded text-black font-semibold inline-block">Get Started</a>
+            <p className="mb-6">3 manual scans/week, Shopify integration</p>
+            <a
+              href="#demo"
+              className="bg-green-500 hover:bg-green-600 px-4 py-2 rounded text-black font-semibold inline-block"
+            >
+              Get Started
+            </a>
           </div>
           <div className="bg-gray-800 p-6 rounded shadow border border-green-500">
             <h4 className="text-xl font-semibold mb-4">Pro</h4>
             <p className="text-green-400 text-2xl font-bold mb-4">£29/mo</p>
-            <p className="mb-6">Multi-location tracking + ghost stock prediction, Auto Daily scans & more</p>
-            <a href="#demo" className="bg-green-500 hover:bg-green-600 px-4 py-2 rounded text-black font-semibold inline-block">Get Started</a>
+            <p className="mb-6">Multi-location tracking, ghost stock prediction, auto daily scans & more</p>
+            <a
+              href="#demo"
+              className="bg-green-500 hover:bg-green-600 px-4 py-2 rounded text-black font-semibold inline-block"
+            >
+              Get Started
+            </a>
           </div>
-          
         </div>
       </section>
 
@@ -67,7 +100,9 @@ export default function Home() {
         <form className="space-y-4">
           <input type="text" placeholder="Your Name" className="w-full px-4 py-2 rounded text-black" required />
           <input type="email" placeholder="Your Email" className="w-full px-4 py-2 rounded text-black" required />
-          <button className="bg-green-500 hover:bg-green-600 px-6 py-3 rounded text-black font-semibold w-full">Request Demo</button>
+          <button className="bg-green-500 hover:bg-green-600 px-6 py-3 rounded text-black font-semibold w-full">
+            Request Demo
+          </button>
         </form>
       </section>
     </main>
