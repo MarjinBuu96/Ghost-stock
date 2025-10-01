@@ -9,7 +9,7 @@ import crypto from "crypto";
  */
 export function verifyOAuthQueryHmac(query, hmac, secret) {
   const sortedParams = Object.entries(query)
-    .filter(([key]) => key !== "hmac" && key !== "signature")
+    .filter(([key]) => key !== "hmac" && key !== "signature" && key !== "host") // ← exclude host
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([key, value]) => `${key}=${Array.isArray(value) ? value.join(",") : value}`)
     .join("&");
@@ -25,3 +25,5 @@ export function verifyOAuthQueryHmac(query, hmac, secret) {
   }
   return match;
 }
+
+
