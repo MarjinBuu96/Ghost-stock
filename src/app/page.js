@@ -123,7 +123,7 @@ export default function Home() {
         <div className="grid md:grid-cols-3 gap-8">
           <div className="bg-gray-800 p-6 rounded shadow">
             <h4 className="text-xl font-semibold mb-4">Starter</h4>
-            <p className="text-green-400 text-2xl font-bold mb-4">FREE</p>
+            <p className="text-green-400 text-2xl font-bold mb-4">£9.99/mo</p>
             <p className="mb-6">3 manual scans/week, Shopify integration</p>
             <a
               href="#demo"

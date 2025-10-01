@@ -1,3 +1,4 @@
+// src/app/api/shopify/billing/upgrade/route.js
 export const runtime = "nodejs";
 
 import { NextResponse } from "next/server";
@@ -7,6 +8,7 @@ import { getActiveSubscriptions } from "@/lib/shopifyBilling";
 
 const API_VERSION = "2025-07";
 
+/** Decode admin host param to shop domain */
 function shopFromHostParam(hostB64) {
   if (!hostB64) return null;
   try {
@@ -18,6 +20,7 @@ function shopFromHostParam(hostB64) {
   }
 }
 
+/** Pull shop from cookie/header/host param */
 function getShopFromRequest(req) {
   try {
     const c = cookies();
@@ -37,15 +40,50 @@ function getShopFromRequest(req) {
   return null;
 }
 
+/** Price + label + trial per plan */
 function planToPricing(plan) {
+  const test = (v, d) => (v === undefined || v === null || v === "" ? d : v);
+
   switch (String(plan || "").toLowerCase()) {
+    case "starter":
+      return {
+        name: "Ghost Stock Starter (Monthly)",
+        amount: Number(test(process.env.STARTER_PRICE_GBP, "9.99")),
+        currencyCode: "GBP",
+        trialDays: Number(test(process.env.STARTER_TRIAL_DAYS, "7")),
+      };
     case "pro":
-      return { name: "Ghost Stock Pro", amount: 29.0, currencyCode: "GBP" };
+      return {
+        name: "Ghost Stock Pro (Monthly)",
+        amount: Number(test(process.env.PRO_PRICE_GBP, "29")),
+        currencyCode: "GBP",
+        trialDays: Number(test(process.env.PRO_TRIAL_DAYS, "0")),
+      };
     case "enterprise":
-      return { name: "Ghost Stock Enterprise", amount: 199.0, currencyCode: "GBP" };
+      return {
+        name: "Ghost Stock Enterprise (Monthly)",
+        amount: Number(test(process.env.ENTERPRISE_PRICE_GBP, "199")),
+        currencyCode: "GBP",
+        trialDays: Number(test(process.env.ENTERPRISE_TRIAL_DAYS, "0")),
+      };
     default:
       return null;
   }
+}
+
+async function shopifyGraphQL(shop, accessToken, query, variables) {
+  const resp = await fetch(`https://${shop}/admin/api/${API_VERSION}/graphql.json`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Shopify-Access-Token": accessToken,
+    },
+    body: JSON.stringify({ query, variables }),
+  });
+  const text = await resp.text();
+  let json;
+  try { json = JSON.parse(text); } catch { json = { raw: text }; }
+  return { ok: resp.ok, status: resp.status, json };
 }
 
 export async function POST(req) {
@@ -62,67 +100,67 @@ export async function POST(req) {
       return NextResponse.json({ error: "no_store_or_token", shop }, { status: 400 });
     }
 
-    const origin = new URL(req.url).origin;
-    const host = new URL(req.url).searchParams.get("host");
+    const url = new URL(req.url);
+    const origin = url.origin;
+    const host = url.searchParams.get("host") || "";
     const returnUrl = `${origin}/settings?shop=${encodeURIComponent(shop)}&host=${encodeURIComponent(host)}&upgraded=1`;
 
-    // ✅ Handle starter downgrade + cancel billing
-    if (String(plan).toLowerCase() === "starter") {
-      try {
-        const activeSubs = await getActiveSubscriptions(shop, store.accessToken);
-        for (const sub of activeSubs) {
-          const cancelMutation = `
-            mutation CancelSubscription($id: ID!) {
-              appSubscriptionCancel(id: $id) {
-                appSubscription { id status }
-                userErrors { field message }
-              }
-            }
-          `;
-          const cancelVars = { id: sub.id };
-          const cancelResp = await fetch(`https://${shop}/admin/api/${API_VERSION}/graphql.json`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "X-Shopify-Access-Token": store.accessToken,
-            },
-            body: JSON.stringify({ query: cancelMutation, variables: cancelVars }),
-          });
-          const cancelJson = await cancelResp.json();
-          console.log("🧹 Cancel result:", cancelJson);
-        }
-
-        await prisma.userSettings.update({
-          where: { userEmail: store.userEmail },
-          data: { plan: "starter" },
-        });
-        console.log("✅ Downgraded to starter and cancelled billing");
-      } catch (err) {
-        console.warn("⚠️ Starter downgrade failed:", err);
-        await prisma.userSettings.create({
-          data: {
-            userEmail: store.userEmail,
-            currency: store.currency || "USD",
-            plan: "starter",
-          },
-        });
-        console.log("✅ Starter plan created");
-      }
-
-      return NextResponse.json({ confirmationUrl: returnUrl });
-    }
-
-    // ✅ Proceed with Shopify billing for paid plans
+    // Figure out pricing for requested plan (Starter is now paid)
     const pricing = planToPricing(plan);
     if (!pricing) return NextResponse.json({ error: "unknown_plan" }, { status: 400 });
 
-    const testFlag = String(process.env.SHOPIFY_BILLING_TEST || "").toLowerCase() === "true";
+    // Check current subs
+    const activeSubs = await getActiveSubscriptions(shop, store.accessToken);
+    const active = activeSubs?.find(s => String(s.status).toUpperCase() === "ACTIVE") || null;
 
-    const mutation = `
+    // If already on the same (by name match), don't recreate—just bounce back.
+    if (active && active.name && active.name.toLowerCase().includes(plan.toLowerCase())) {
+      console.log("ℹ️ Subscription already active for target plan:", active.name);
+      return NextResponse.json({ confirmationUrl: returnUrl });
+    }
+
+    // Cancel any existing active subs first (switching plan)
+    if (active) {
+      const cancelMutation = `
+        mutation CancelSubscription($id: ID!) {
+          appSubscriptionCancel(id: $id) {
+            appSubscription { id status }
+            userErrors { field message }
+          }
+        }
+      `;
+      const { ok, status, json } = await shopifyGraphQL(
+        shop,
+        store.accessToken,
+        cancelMutation,
+        { id: active.id }
+      );
+      console.log("🧹 Cancel current sub:", status, JSON.stringify(json));
+      if (!ok || json?.errors || json?.data?.appSubscriptionCancel?.userErrors?.length) {
+        return NextResponse.json(
+          { error: "cancel_failed", payload: json },
+          { status: 502 }
+        );
+      }
+    }
+
+    // Create new subscription
+    const testFlag = String(process.env.SHOPIFY_BILLING_TEST || "").toLowerCase() === "true";
+    const createMutation = `
       mutation appSubscriptionCreate(
-        $name: String!, $lineItems: [AppSubscriptionLineItemInput!]!, $returnUrl: URL!, $test: Boolean
+        $name: String!,
+        $lineItems: [AppSubscriptionLineItemInput!]!,
+        $returnUrl: URL!,
+        $trialDays: Int,
+        $test: Boolean
       ) {
-        appSubscriptionCreate(name: $name, lineItems: $lineItems, returnUrl: $returnUrl, test: $test) {
+        appSubscriptionCreate(
+          name: $name,
+          lineItems: $lineItems,
+          returnUrl: $returnUrl,
+          trialDays: $trialDays,
+          test: $test
+        ) {
           confirmationUrl
           userErrors { field message }
         }
@@ -132,63 +170,60 @@ export async function POST(req) {
     const variables = {
       name: pricing.name,
       returnUrl,
+      trialDays: pricing.trialDays > 0 ? pricing.trialDays : null,
       test: testFlag,
-      lineItems: [{
-        plan: {
-          appRecurringPricingDetails: {
-            price: { amount: pricing.amount, currencyCode: pricing.currencyCode },
-            interval: "EVERY_30_DAYS",
+      lineItems: [
+        {
+          plan: {
+            appRecurringPricingDetails: {
+              price: { amount: pricing.amount, currencyCode: pricing.currencyCode },
+              interval: "EVERY_30_DAYS",
+            },
           },
         },
-      }],
+      ],
     };
 
-    console.log("📤 Sending to Shopify:", JSON.stringify({ query: mutation, variables }, null, 2));
+    console.log("📤 Create sub →", JSON.stringify(variables, null, 2));
+    const { ok, status, json } = await shopifyGraphQL(
+      shop,
+      store.accessToken,
+      createMutation,
+      variables
+    );
+    console.log("📦 Create sub resp:", status, JSON.stringify(json));
 
-    const resp = await fetch(`https://${shop}/admin/api/${API_VERSION}/graphql.json`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Shopify-Access-Token": store.accessToken,
-      },
-      body: JSON.stringify({ query: mutation, variables }),
-    });
-
-    const text = await resp.text();
-    console.log("📦 Raw Shopify billing response:", text);
-
-    let json;
-    try {
-      json = JSON.parse(text);
-    } catch {
-      json = { raw: text };
-    }
-
-    if (!resp.ok) {
-      console.error("❌ Shopify HTTP error:", resp.status);
-      console.error("🧾 Parsed response:", json);
+    if (!ok) {
       return NextResponse.json(
-        { error: "shopify_graphql_http", status: resp.status, payload: json },
+        { error: "shopify_graphql_http", status, payload: json },
         { status: 502 }
       );
     }
-
     const result = json?.data?.appSubscriptionCreate;
     if (!result) {
-      console.error("❌ Missing appSubscriptionCreate:", json);
       return NextResponse.json({ error: "missing_subscription_create", payload: json }, { status: 502 });
     }
-
-    const userErrors = result?.userErrors || [];
-    if (userErrors.length) {
-      return NextResponse.json({ error: "shopify_user_errors", userErrors }, { status: 400 });
+    if (result.userErrors?.length) {
+      return NextResponse.json({ error: "shopify_user_errors", userErrors: result.userErrors }, { status: 400 });
     }
-
-    const confirmationUrl = result?.confirmationUrl;
-    console.log("✅ Confirmation URL:", confirmationUrl);
-
+    const confirmationUrl = result.confirmationUrl;
     if (!confirmationUrl) {
       return NextResponse.json({ error: "no_confirmation_url", payload: json }, { status: 500 });
+    }
+
+    // Optional: set local plan immediately as intent (final status will be confirmed via webhook/poll)
+    try {
+      await prisma.userSettings.upsert({
+        where: { userEmail: store.userEmail },
+        update: { plan: String(plan).toLowerCase() },
+        create: {
+          userEmail: store.userEmail,
+          currency: "GBP",
+          plan: String(plan).toLowerCase(),
+        },
+      });
+    } catch (e) {
+      console.warn("userSettings upsert failed (non-fatal):", e?.message || e);
     }
 
     return NextResponse.json({ confirmationUrl });
