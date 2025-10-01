@@ -26,6 +26,7 @@ async function ensureComplianceWebhooks(shop, accessToken, appOrigin) {
   for (const body of payloads) {
     try {
       await fetch(base, { method: "POST", headers, body: JSON.stringify(body) });
+      console.log(`✅ Webhook registered: ${body.webhook.topic}`);
     } catch (e) {
       console.error("⚠️ Webhook registration failed:", body.webhook.topic, e);
     }
@@ -38,11 +39,15 @@ export async function GET(req) {
   const state = url.searchParams.get("state") || "";
   const hmac = url.searchParams.get("hmac") || "";
 
+  console.log("🔍 OAuth callback hit:", { shop, state });
+
   if (!shop.endsWith(".myshopify.com")) {
+    console.warn("❌ Invalid shop domain:", shop);
     return NextResponse.json({ error: "invalid_shop" }, { status: 400 });
   }
 
   if (!verifyOAuthQueryHmac(url.searchParams, hmac, process.env.SHOPIFY_API_SECRET || "")) {
+    console.warn("❌ Bad HMAC for shop:", shop);
     return NextResponse.json({ error: "bad_hmac" }, { status: 401 });
   }
 
@@ -60,12 +65,14 @@ export async function GET(req) {
   const cookieOk = cookieState && cookieState === state;
 
   if (!recOk && !cookieOk) {
+    console.warn("❌ Invalid OAuth state:", { recOk, cookieOk });
     return NextResponse.json({ error: "invalid_state" }, { status: 400 });
   }
 
   if (recOk) {
     try {
       await prisma.oAuthState.delete({ where: { state } });
+      console.log("🧹 Deleted OAuth state record:", state);
     } catch (err) {
       console.warn("⚠️ Failed to delete OAuth state:", err);
     }
@@ -87,7 +94,9 @@ export async function GET(req) {
   let payload = {};
   try {
     payload = await r.json();
-  } catch {}
+  } catch (err) {
+    console.error("❌ Failed to parse token response:", err);
+  }
 
   if (!r.ok || !payload?.access_token) {
     console.error("❌ Token exchange failed:", payload);
@@ -95,6 +104,7 @@ export async function GET(req) {
   }
 
   const accessToken = payload.access_token;
+  console.log("🔁 OAuth token received:", accessToken);
 
   try {
     await prisma.store.upsert({
@@ -107,7 +117,7 @@ export async function GET(req) {
         createdAt: new Date(),
       },
     });
-    console.log("✅ Store upserted:", shop);
+    console.log("✅ Token stored in DB for:", shop);
   } catch (err) {
     console.error("❌ Failed to upsert store:", err);
     return NextResponse.json({ error: "store_upsert_failed" }, { status: 500 });
@@ -123,5 +133,6 @@ export async function GET(req) {
     maxAge: 365 * 24 * 60 * 60,
   });
   res.headers.set("Cache-Control", "no-store");
+  console.log("🚀 Redirecting to dashboard for:", shop);
   return res;
 }
