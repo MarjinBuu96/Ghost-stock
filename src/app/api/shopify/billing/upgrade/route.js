@@ -41,8 +41,8 @@ function planToPricing(plan) {
   switch (String(plan || "").toLowerCase()) {
     case "pro":
       return { name: "Ghost Stock Pro", amount: 29.0, currencyCode: "GBP" };
-    case "enterprise":
-      return { name: "Ghost Stock Enterprise", amount: 199.0, currencyCode: "GBP" };
+    case "starter":
+      return { name: "Ghost Stock Starter", amount: 9.99, currencyCode: "GBP" };
     default:
       return null;
   }
