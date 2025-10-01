@@ -5,28 +5,34 @@ import { NextResponse } from "next/server";
 import { getActiveStore } from "@/lib/getActiveStore";
 import { getInventorySnapshot } from "@/lib/shopifyRest";
 
+const SHOPIFY_API_VERSION = "2025-07";
+
 export async function GET(req) {
   try {
     const store = await getActiveStore(req);
+
     if (!store || !store.shop || !store.accessToken) {
-      return NextResponse.json({ items: [], count: 0 });
+      console.warn("❌ Missing store or access token");
+      return NextResponse.json({ items: [], count: 0, error: "missing_store_or_token" });
     }
 
+    console.log("🔑 Using access token:", store.accessToken);
+
     // 🔍 Validate token with lightweight request
-    const testRes = await fetch(`https://${store.shop}/admin/api/2023-07/shop.json`, {
+    const testRes = await fetch(`https://${store.shop}/admin/api/${SHOPIFY_API_VERSION}/shop.json`, {
       headers: {
-        'X-Shopify-Access-Token': store.accessToken,
-        'Content-Type': 'application/json',
+        "X-Shopify-Access-Token": store.accessToken,
+        "Content-Type": "application/json",
       },
     });
 
     if (!testRes.ok) {
-      const errorData = await testRes.json();
+      const errorData = await testRes.json().catch(() => ({}));
       console.warn("debug/token-check failed:", testRes.status, errorData);
 
       // 🔁 Redirect to re-auth if token is invalid
       if (testRes.status === 401) {
-        const reauthUrl = new URL(`/api/auth`, req.url);
+        const reauthUrl = new URL("/api/auth", req.url);
         reauthUrl.searchParams.set("shop", store.shop);
         return NextResponse.redirect(reauthUrl);
       }
