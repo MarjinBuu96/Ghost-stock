@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 
 import { getInventoryByVariant, getSalesByVariant } from "@/lib/shopifyRest";
 import { computeAlerts } from "@/lib/alertsEngine";
+import { sendAlertEmail } from "@/lib/email"; // ✅ ADDED
 
 function makeUniqueHash(a) {
   const day = new Date().toISOString().slice(0, 10);
@@ -267,6 +268,44 @@ async function scanForStore({ store, sessionEmail, enforceStarterLimit }) {
         body: { error: "db_write_failed", message: e?.message || String(e) },
       };
     }
+  }
+
+  // ✅ Email notify (Pro only) when there are new/updated alerts and a notification email is set
+  try {
+    if (alerts.length > 0) {
+      const settings = await prisma.userSettings.findUnique({
+        where: { userEmail: store.userEmail },
+      });
+
+      const plan = String(settings?.plan || "starter").toLowerCase();
+      const to = settings?.notificationEmail;
+
+      if (plan === "pro" && to) {
+        const high = alerts.filter(a => a.severity === "high").length;
+        const med = alerts.length - high;
+
+        const html = `
+          <div style="font-family:system-ui,Segoe UI,Roboto,Arial">
+            <h2>Ghost Stock – ${alerts.length} new alert${alerts.length === 1 ? "" : "s"}</h2>
+            <p>Shop: <b>${store.shop}</b></p>
+            <p>High: <b>${high}</b> • Medium: <b>${med}</b></p>
+            <p><a href="https://ghost-stock.co.uk/dashboard">Open dashboard</a></p>
+            <hr/>
+            <p style="color:#666;font-size:12px">You’re receiving this because email alerts are enabled in Settings.</p>
+          </div>
+        `;
+
+        await sendAlertEmail({
+          to,
+          subject: `Ghost Stock – ${alerts.length} new alert${alerts.length === 1 ? "" : "s"}`,
+          html,
+          text: `New alerts: ${alerts.length} (High: ${high}, Med: ${med}) – https://ghost-stock.co.uk/dashboard`,
+        });
+      }
+    }
+  } catch (e) {
+    console.warn("[scan] email notify failed:", e?.message || e);
+    // non-fatal
   }
 
   // Touch lastScanAt
