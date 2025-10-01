@@ -23,6 +23,14 @@ export async function GET(req) {
     if (!testRes.ok) {
       const errorData = await testRes.json();
       console.warn("debug/token-check failed:", testRes.status, errorData);
+
+      // 🔁 Redirect to re-auth if token is invalid
+      if (testRes.status === 401) {
+        const reauthUrl = new URL(`/api/auth`, req.url);
+        reauthUrl.searchParams.set("shop", store.shop);
+        return NextResponse.redirect(reauthUrl);
+      }
+
       return NextResponse.json({ items: [], count: 0, error: "invalid_token" });
     }
 
