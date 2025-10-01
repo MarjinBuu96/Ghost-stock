@@ -1,29 +1,31 @@
+// lib/shopifyHmac.js
 import crypto from "crypto";
 
 /**
- * Verifies Shopify OAuth HMAC using query params and shared secret.
- * @param {Object} query - Parsed query object (not URLSearchParams)
- * @param {string} hmac - HMAC from Shopify
- * @param {string} secret - Your Shopify API secret
- * @returns {boolean}
+ * Verifies Shopify OAuth HMAC using the RAW query string.
+ * Includes all params except hmac/signature. Sort by key. No decoding/re-encoding.
  */
-export function verifyOAuthQueryHmac(query, hmac, secret) {
-  const sortedParams = Object.entries(query)
-    .filter(([key]) => key !== "hmac" && key !== "signature" && key !== "host") // ← exclude host
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([key, value]) => `${key}=${Array.isArray(value) ? value.join(",") : value}`)
-    .join("&");
+export function verifyShopifyHmacFromRawQS(rawQueryString, providedHmac, appSecret) {
+  if (!rawQueryString || !providedHmac || !appSecret) return false;
 
-  const generated = crypto
-    .createHmac("sha256", secret)
-    .update(sortedParams)
-    .digest("hex");
+  const stripped = rawQueryString
+    .replace(/(^|&)hmac=[^&]*/i, "$1")
+    .replace(/(^|&)signature=[^&]*/i, "$1")
+    .replace(/^&+|&+$/g, "");
 
-  const match = generated === hmac;
-  if (!match) {
-    console.warn("🔐 HMAC mismatch", { sortedParams, generated, provided: hmac });
-  }
-  return match;
+  const pairs = stripped
+    .split("&")
+    .filter(Boolean)
+    .map(kv => {
+      const i = kv.indexOf("=");
+      return i === -1 ? [kv, ""] : [kv.slice(0, i), kv.slice(i + 1)];
+    });
+
+  pairs.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  const message = pairs.map(([k, v]) => `${k}=${v}`).join("&");
+
+  const computed = crypto.createHmac("sha256", appSecret).update(message, "utf8").digest("hex");
+  const A = Buffer.from(computed, "utf8");
+  const B = Buffer.from(String(providedHmac).toLowerCase(), "utf8");
+  return A.length === B.length && crypto.timingSafeEqual(A, B);
 }
-
-

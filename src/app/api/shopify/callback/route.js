@@ -1,10 +1,11 @@
+// app/api/shopify/callback/route.js
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { prisma } from "@/lib/prisma";
-import { verifyOAuthQueryHmac } from "@/lib/shopifyHmac";
+import { verifyShopifyHmacFromRawQS } from "@/lib/shopifyHmac";
 
 const STATE_MAX_AGE_MS = 15 * 60 * 1000;
 const STATE_COOKIE = "shopify_oauth_state";
@@ -46,11 +47,24 @@ export async function GET(req) {
     return NextResponse.json({ error: "invalid_shop" }, { status: 400 });
   }
 
-  if (!verifyOAuthQueryHmac(Object.fromEntries(url.searchParams), hmac, process.env.SHOPIFY_API_SECRET || "")) {
+  // ✅ verify using the RAW query string (includes host/locale/etc exactly as sent)
+  const rawQS = req.url.split("?", 2)[1] || "";
+  const secret = process.env.SHOPIFY_API_SECRET || "";
+  const ok = verifyShopifyHmacFromRawQS(rawQS, hmac, secret);
+
+  if (!ok) {
     console.warn("❌ Bad HMAC for shop:", shop);
     return NextResponse.json({ error: "bad_hmac" }, { status: 401 });
   }
 
+  // Optional freshness check (5 min window)
+  const ts = Number(url.searchParams.get("timestamp") || 0);
+  const now = Math.floor(Date.now() / 1000);
+  if (!Number.isFinite(ts) || Math.abs(now - ts) > 300) {
+    return NextResponse.json({ error: "stale_callback" }, { status: 400 });
+  }
+
+  // ----- state checks (unchanged) -----
   let rec = null;
   try {
     rec = await prisma.oAuthState.findUnique({ where: { state } });
@@ -58,9 +72,7 @@ export async function GET(req) {
     console.warn("⚠️ Failed to fetch OAuth state:", err);
   }
 
-  const recOk = !!rec && rec.shop === shop &&
-    Date.now() - rec.createdAt.getTime() <= STATE_MAX_AGE_MS;
-
+  const recOk = !!rec && rec.shop === shop && Date.now() - rec.createdAt.getTime() <= STATE_MAX_AGE_MS;
   const cookieState = cookies().get(STATE_COOKIE)?.value || "";
   const cookieOk = cookieState && cookieState === state;
 
@@ -78,6 +90,7 @@ export async function GET(req) {
     }
   }
 
+  // ----- token exchange -----
   const code = url.searchParams.get("code") || "";
   const tokenUrl = `https://${shop}/admin/oauth/access_token`;
 
@@ -86,7 +99,7 @@ export async function GET(req) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       client_id: process.env.SHOPIFY_API_KEY || "",
-      client_secret: process.env.SHOPIFY_API_SECRET || "",
+      client_secret: secret,
       code,
     }),
   });
@@ -104,22 +117,13 @@ export async function GET(req) {
   }
 
   const accessToken = payload.access_token;
-  console.log("🔁 OAuth token received:", accessToken);
+  console.log("🔁 OAuth token received (masked):", accessToken ? accessToken.slice(0, 6) + "…" : "(none)");
 
   try {
     const store = await prisma.store.upsert({
       where: { shop },
-      update: {
-        accessToken,
-        updatedAt: new Date(),
-      },
-      create: {
-        shop,
-        accessToken,
-        userEmail: shop,
-        currency: null,
-        createdAt: new Date(),
-      },
+      update: { accessToken, updatedAt: new Date() },
+      create: { shop, accessToken, userEmail: shop, currency: null, createdAt: new Date() },
     });
     console.log("✅ Token stored in DB for:", store.shop);
   } catch (err) {
@@ -130,7 +134,7 @@ export async function GET(req) {
   await ensureComplianceWebhooks(shop, accessToken, url.origin);
 
   const res = NextResponse.redirect(new URL("/dashboard", url.origin));
-  res.cookies.set(SHOP_COOKIE, shop, {
+  res.cookies.set("shopify_shop", shop, {
     secure: true,
     sameSite: "none",
     path: "/",
