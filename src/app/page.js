@@ -1,29 +1,54 @@
 "use client";
 
+import { useEffect, useRef } from "react";
+import createApp from "@shopify/app-bridge";
+import { Redirect } from "@shopify/app-bridge/actions";
+
 import StockDashboardMock from "@/components/StockDashboardMock";
 import BlogHeader from "@/components/BlogHeader";
-import { useCallback } from "react";
+
+const BLOG_URL = "https://blog.ghost-stock.co.uk";
 
 export default function Home() {
-  // If we’re inside the Shopify admin iframe, force the top window to navigate
-  const openBlog = useCallback((e) => {
-    // always route to your own domain so it works with the Vercel rewrite
-    const url = `${window.location.origin}/blog`;
+  const appRef = useRef(null);
+  const isEmbedded =
+    typeof window !== "undefined" && window.top !== window.self;
 
-    // if embedded (inside iframe), bust out to top to avoid Shopify’s iframe restrictions
-    if (typeof window !== "undefined" && window.top && window.top !== window.self) {
-      e.preventDefault();
-      try {
-        window.top.location.href = url;
-      } catch {
-        // as a fallback, open a new tab
-        window.open(url, "_blank", "noopener,noreferrer");
-      }
+  // If we are inside Shopify Admin, initialize App Bridge so we can redirect safely
+  useEffect(() => {
+    if (!isEmbedded) return;
+    const params = new URLSearchParams(window.location.search);
+    const host =
+      params.get("host") ||
+      document.cookie.match(/(?:^|;\s*)shopifyHost=([^;]+)/)?.[1] ||
+      null;
+    if (!host) return;
+
+    let app = window.__SHOPIFY_APP__;
+    if (!app) {
+      app = createApp({
+        apiKey: process.env.NEXT_PUBLIC_SHOPIFY_API_KEY,
+        host,
+        forceRedirect: true,
+      });
+      window.__SHOPIFY_APP__ = app;
+    }
+    appRef.current = app;
+  }, [isEmbedded]);
+
+  function onBlogClick(e) {
+    if (!isEmbedded) return; // normal navigation on public site
+    e.preventDefault();
+    const app = appRef.current;
+    if (!app) {
+      // Fallback: open a new tab if App Bridge isn't ready
+      window.open(BLOG_URL, "_blank", "noopener,noreferrer");
       return;
     }
-
-    // otherwise let the normal link work (client-side route)
-  }, []);
+    const redirect = Redirect.create(app);
+    // REMOTE = full external URL (outside Admin)
+    redirect.dispatch(Redirect.Action.REMOTE, BLOG_URL);
+  }
 
   return (
     <main className="px-6">
@@ -33,9 +58,9 @@ export default function Home() {
           Stop Selling Stock You Don’t Have
         </h2>
         <p className="text-lg text-gray-300 max-w-2xl mx-auto mb-8">
-          Ghost inventory is killing your revenue and reputation. Our tool detects and predicts stock errors before they cost you money.
+          Ghost inventory is killing your revenue and reputation. Our tool
+          detects and predicts stock errors before they cost you money.
         </p>
-
         <div className="flex justify-center gap-4">
           <a
             href="#demo"
@@ -49,11 +74,12 @@ export default function Home() {
           >
             See How It Works
           </a>
-          {/* BLOG link – uses /blog so Vercel can proxy to Ghost(Pro) */}
+          {/* Use absolute URL + App Bridge redirect when embedded */}
           <a
-            href="/blog"
-            onClick={openBlog}
-            rel="noopener noreferrer"
+            href={BLOG_URL}
+            onClick={onBlogClick}
+            target={isEmbedded ? undefined : "_blank"}
+            rel={isEmbedded ? undefined : "noopener noreferrer"}
             className="border border-green-500 text-green-400 px-6 py-3 rounded hover:bg-gray-800"
           >
             Read the Blog
@@ -109,7 +135,9 @@ export default function Home() {
           <div className="bg-gray-800 p-6 rounded shadow border border-green-500">
             <h4 className="text-xl font-semibold mb-4">Pro</h4>
             <p className="text-green-400 text-2xl font-bold mb-4">£29/mo</p>
-            <p className="mb-6">Multi-location tracking, ghost stock prediction, auto daily scans & more</p>
+            <p className="mb-6">
+              Multi-location tracking, ghost stock prediction, auto daily scans & more
+            </p>
             <a
               href="#demo"
               className="bg-green-500 hover:bg-green-600 px-4 py-2 rounded text-black font-semibold inline-block"
@@ -123,8 +151,18 @@ export default function Home() {
       <section id="demo" className="py-16 text-center max-w-md mx-auto">
         <h3 className="text-3xl font-bold mb-6">Request a Demo</h3>
         <form className="space-y-4">
-          <input type="text" placeholder="Your Name" className="w-full px-4 py-2 rounded text-black" required />
-          <input type="email" placeholder="Your Email" className="w-full px-4 py-2 rounded text-black" required />
+          <input
+            type="text"
+            placeholder="Your Name"
+            className="w-full px-4 py-2 rounded text-black"
+            required
+          />
+          <input
+            type="email"
+            placeholder="Your Email"
+            className="w-full px-4 py-2 rounded text-black"
+            required
+          />
           <button className="bg-green-500 hover:bg-green-600 px-6 py-3 rounded text-black font-semibold w-full">
             Request Demo
           </button>
