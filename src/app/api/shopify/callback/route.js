@@ -46,7 +46,7 @@ export async function GET(req) {
     return NextResponse.json({ error: "invalid_shop" }, { status: 400 });
   }
 
-  if (!verifyOAuthQueryHmac(url.searchParams, hmac, process.env.SHOPIFY_API_SECRET || "")) {
+  if (!verifyOAuthQueryHmac(Object.fromEntries(url.searchParams), hmac, process.env.SHOPIFY_API_SECRET || "")) {
     console.warn("❌ Bad HMAC for shop:", shop);
     return NextResponse.json({ error: "bad_hmac" }, { status: 401 });
   }
@@ -107,20 +107,24 @@ export async function GET(req) {
   console.log("🔁 OAuth token received:", accessToken);
 
   try {
-    await prisma.store.upsert({
+    const store = await prisma.store.upsert({
       where: { shop },
-      update: { accessToken, updatedAt: new Date() },
+      update: {
+        accessToken,
+        updatedAt: new Date(),
+      },
       create: {
         shop,
         accessToken,
         userEmail: shop,
+        currency: null,
         createdAt: new Date(),
       },
     });
-    console.log("✅ Token stored in DB for:", shop);
+    console.log("✅ Token stored in DB for:", store.shop);
   } catch (err) {
     console.error("❌ Failed to upsert store:", err);
-    return NextResponse.json({ error: "store_upsert_failed" }, { status: 500 });
+    return NextResponse.json({ error: "store_upsert_failed", details: err.message }, { status: 500 });
   }
 
   await ensureComplianceWebhooks(shop, accessToken, url.origin);
