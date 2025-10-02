@@ -5,11 +5,10 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { prisma } from "@/lib/prisma";
 
-import { getInventoryByVariant, getSalesByVariant } from "@/lib/shopifyRest";
+import { getInventoryByVariantGQL } from "@/lib/shopifyGraphql";
+import { getSalesByVariant } from "@/lib/shopifyRest"; // orders still on REST (not in the deprecation notice)
 import { computeAlerts } from "@/lib/alertsEngine";
-import { sendAlertEmail } from "@/lib/email"; // ✅
-
-const SHOPIFY_API_VERSION = "2025-07";
+import { sendAlertEmail } from "@/lib/email";
 
 /** Utility: YYYY-MM-DD key */
 function today() {
@@ -19,58 +18,6 @@ function today() {
 /** Unique hash (per day) used by your Alert upserts */
 function makeUniqueHash(a) {
   return `${a.sku}|${a.severity}|${today()}`;
-}
-
-/**
- * Fetch inventory levels for many inventory_item_ids, optionally restricted to location_ids.
- * Returns a Map<inventory_item_id, summedAvailable>.
- */
-async function fetchInventoryLevelsMap(shop, accessToken, inventoryItemIds = [], locationIds = []) {
-  const out = new Map();
-  if (!Array.isArray(inventoryItemIds) || inventoryItemIds.length === 0) return out;
-
-  // Shopify REST limits: chunk inventory_item_ids (50 per request is safe)
-  const chunk = (arr, n) => {
-    const res = [];
-    for (let i = 0; i < arr.length; i += n) res.push(arr.slice(i, i + n));
-    return res;
-  };
-
-  const idChunks = chunk(inventoryItemIds, 50);
-  const locParam = (Array.isArray(locationIds) && locationIds.length > 0)
-    ? `&location_ids=${encodeURIComponent(locationIds.join(","))}`
-    : "";
-
-  for (const ids of idChunks) {
-    const url = `https://${shop}/admin/api/${SHOPIFY_API_VERSION}/inventory_levels.json?inventory_item_ids=${encodeURIComponent(
-      ids.join(",")
-    )}${locParam}`;
-
-    const resp = await fetch(url, {
-      method: "GET",
-      headers: {
-        "X-Shopify-Access-Token": accessToken,
-        "Content-Type": "application/json",
-      },
-    });
-
-    if (!resp.ok) {
-      const text = await resp.text();
-      throw new Error(`inventory_levels HTTP ${resp.status}: ${text}`);
-    }
-
-    const json = await resp.json();
-    const levels = Array.isArray(json?.inventory_levels) ? json.inventory_levels : [];
-
-    for (const lvl of levels) {
-      const key = String(lvl.inventory_item_id);
-      const prev = out.get(key) ?? 0;
-      const available = Number(lvl.available ?? 0);
-      out.set(key, prev + (Number.isFinite(available) ? available : 0));
-    }
-  }
-
-  return out;
 }
 
 /** Merge computeAlerts output with extra "low stock threshold" alerts (dedup by SKU) */
@@ -86,12 +33,10 @@ function mergeWithThresholdAlerts(baseAlerts, invItems, threshold) {
     const qty = Number(it.systemQty ?? 0);
     if (qty <= threshold) {
       if (!bySku.has(it.sku)) {
-        // Create a conservative MED alert if not already present
         bySku.set(it.sku, {
           sku: it.sku,
           product: it.product || it.title || it.name || "",
           systemQty: qty,
-          // Use threshold as a helpful band hint; caller can style however they like
           expectedMin: threshold + 1,
           expectedMax: threshold + 1,
           severity: "med",
@@ -101,6 +46,12 @@ function mergeWithThresholdAlerts(baseAlerts, invItems, threshold) {
   }
 
   return Array.from(bySku.values());
+}
+
+/** Normalize Shopify location id: supports gid or numeric strings */
+function normalizeLocId(id) {
+  const s = String(id || "");
+  return s.includes("/Location/") ? s.split("/Location/").pop() : s;
 }
 
 /**
@@ -283,10 +234,12 @@ async function scanForStore({ store, sessionEmail, enforceStarterLimit }) {
     }
   }
 
-  // Shopify pulls
+  // ── Inventory via GraphQL (variants/products) ────────────────────────────────
   let inventory = [];
   try {
-    inventory = await getInventoryByVariant(store.shop, store.accessToken);
+    inventory = await getInventoryByVariantGQL(store.shop, store.accessToken, {
+      multiLocation: useMultiLocation, // includes per-location levels + sets systemQty to total when true
+    });
     if (!Array.isArray(inventory)) inventory = [];
   } catch (e) {
     console.error("Inventory fetch failed:", e);
@@ -297,43 +250,26 @@ async function scanForStore({ store, sessionEmail, enforceStarterLimit }) {
     };
   }
 
-  // If Pro/Enterprise + multi-location enabled, aggregate system qty across locations
+  // If multi-location and specific locations selected, re-sum just those
   let inventoryForAlerts = inventory;
   try {
-    if (useMultiLocation) {
-      // Build map of inventory_item_id -> summed available (optionally over selected locations)
-      const itemIds = Array.from(
-        new Set(
-          inventory
-            .map((x) => String(x.inventory_item_id || x.inventoryItemId || "").trim())
-            .filter(Boolean)
-        )
-      );
-
-      if (itemIds.length > 0) {
-        const levelsMap = await fetchInventoryLevelsMap(
-          store.shop,
-          store.accessToken,
-          itemIds,
-          selectedLocationIds
-        );
-
-        // Replace systemQty with summed available where present
-        inventoryForAlerts = inventory.map((it) => {
-          const key = String(it.inventory_item_id || it.inventoryItemId || "").trim();
-          const summed = levelsMap.get(key);
-          return {
-            ...it,
-            systemQty: Number.isFinite(summed) ? summed : Number(it.systemQty ?? 0),
-          };
-        });
-      }
+    if (useMultiLocation && selectedLocationIds.length > 0) {
+      const wanted = new Set(selectedLocationIds.map(normalizeLocId));
+      inventoryForAlerts = inventory.map((it) => {
+        const levels = Array.isArray(it.levels) ? it.levels : [];
+        const sum = levels.reduce((acc, lvl) => {
+          const idNorm = normalizeLocId(lvl.locationId);
+          return wanted.has(idNorm) ? acc + (Number(lvl.available) || 0) : acc;
+        }, 0);
+        return { ...it, systemQty: Number.isFinite(sum) ? sum : Number(it.systemQty ?? 0) };
+      });
     }
   } catch (e) {
-    console.warn("Multi-location aggregation failed (non-fatal fallback):", e?.message || e);
-    inventoryForAlerts = inventory; // fallback to original qty
+    console.warn("location filter sum failed (non-fatal):", e?.message || e);
+    inventoryForAlerts = inventory;
   }
 
+  // ── Sales map (REST for now) ────────────────────────────────────────────────
   let salesMap = {};
   try {
     salesMap = await getSalesByVariant(store.shop, store.accessToken);
