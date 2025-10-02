@@ -44,17 +44,22 @@ export default function Home() {
   }, [isEmbedded]);
 
   function onBlogClick(e) {
-    if (!isEmbedded) return; // normal navigation on public site
+    // In Admin, use App Bridge to open the external URL in a NEW TAB
+    if (!isEmbedded) return; // let the native anchor handle public site
     e.preventDefault();
-    const app = appRef.current;
-    if (!app) {
-      // Fallback: open a new tab if App Bridge isn't ready
-      window.open(BLOG_URL, "_blank", "noopener,noreferrer");
-      return;
-    }
-    const redirect = Redirect.create(app);
-    // REMOTE = full external URL (outside Admin)
-    redirect.dispatch(Redirect.Action.REMOTE, BLOG_URL);
+    try {
+      const app = appRef.current;
+      if (app) {
+        const redirect = Redirect.create(app);
+        redirect.dispatch(Redirect.Action.REMOTE, {
+          url: BLOG_URL,
+          newContext: true, // ✅ force outside Admin, new tab
+        });
+        return;
+      }
+    } catch {}
+    // Fallback
+    window.open(BLOG_URL, "_blank", "noopener,noreferrer");
   }
 
   // Start Shopify billing for a given plan
@@ -108,12 +113,13 @@ export default function Home() {
           >
             See How It Works
           </a>
-          {/* Use absolute URL + App Bridge redirect when embedded */}
+
+          {/* Blog — always target _blank; App Bridge handles embed with newContext */}
           <a
             href={BLOG_URL}
             onClick={onBlogClick}
-            target={isEmbedded ? undefined : "_blank"}
-            rel={isEmbedded ? undefined : "noopener noreferrer"}
+            target="_blank"
+            rel="noopener noreferrer"
             className="border border-green-500 text-green-400 px-6 py-3 rounded hover:bg-gray-800"
           >
             Read the Blog
@@ -237,7 +243,7 @@ export default function Home() {
             className="w-full px-4 py-2 rounded text-black"
             required
           />
-        <button className="bg-green-500 hover:bg-green-600 px-6 py-3 rounded text-black font-semibold w-full">
+          <button className="bg-green-500 hover:bg-green-600 px-6 py-3 rounded text-black font-semibold w-full">
             Request Demo
           </button>
         </form>
