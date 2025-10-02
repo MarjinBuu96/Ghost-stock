@@ -9,6 +9,8 @@ import StockDashboardMock from "@/components/StockDashboardMock";
 import BlogHeader from "@/components/BlogHeader";
 
 const BLOG_URL = "https://blog.ghost-stock.co.uk";
+const TERMS_URL = "https://ghost-stock.co.uk/terms";
+const PRIVACY_URL = "https://ghost-stock.co.uk/privacy";
 const ALLOWED_PLANS = ["starter", "starter_annual", "pro", "pro_annual"];
 
 export default function Home() {
@@ -17,7 +19,14 @@ export default function Home() {
   const isEmbedded =
     typeof window !== "undefined" && window.top !== window.self;
 
-  // If we are inside Shopify Admin, initialize App Bridge so we can redirect safely
+  // Demo form state
+  const [demoName, setDemoName] = useState("");
+  const [demoEmail, setDemoEmail] = useState("");
+  const [demoBusy, setDemoBusy] = useState(false);
+  const [demoDone, setDemoDone] = useState(false);
+  const [demoErr, setDemoErr] = useState("");
+
+  // If we are inside Shopify Admin, initialize App Bridge
   useEffect(() => {
     if (!isEmbedded) return;
     const params = new URLSearchParams(window.location.search);
@@ -27,7 +36,6 @@ export default function Home() {
       null;
     if (!hostParam) return;
 
-    // Remember & persist host for billing calls
     setHost(hostParam);
     document.cookie = `shopifyHost=${hostParam}; path=/; SameSite=None; Secure`;
 
@@ -43,30 +51,29 @@ export default function Home() {
     appRef.current = app;
   }, [isEmbedded]);
 
-  function onBlogClick(e) {
-    // In Admin, use App Bridge to open the external URL in a NEW TAB
-    if (!isEmbedded) return; // let the native anchor handle public site
-    e.preventDefault();
+  // Open external links safely when embedded (new tab)
+  function openExternal(url, e) {
+    if (!isEmbedded) return; // native anchor will handle it
+    e?.preventDefault?.();
     try {
       const app = appRef.current;
       if (app) {
         const redirect = Redirect.create(app);
-        redirect.dispatch(Redirect.Action.REMOTE, {
-          url: BLOG_URL,
-          newContext: true, // ✅ force outside Admin, new tab
-        });
+        redirect.dispatch(Redirect.Action.REMOTE, { url, newContext: true });
         return;
       }
     } catch {}
-    // Fallback
-    window.open(BLOG_URL, "_blank", "noopener,noreferrer");
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
+
+  function onBlogClick(e) {
+    openExternal(BLOG_URL, e);
   }
 
   // Start Shopify billing for a given plan
   async function startUpgrade(plan) {
     try {
       if (!isEmbedded) {
-        // Not in Admin: send to demo/request flow (or change to /settings)
         window.location.hash = "#demo";
         return;
       }
@@ -81,11 +88,49 @@ export default function Home() {
       const json = await res.json().catch(() => ({}));
       if (!res.ok || !json?.confirmationUrl) throw new Error(json?.error || "Upgrade failed");
 
-      // Open Shopify approval outside the iframe
       window.open(json.confirmationUrl, "_blank", "noopener,noreferrer");
     } catch (err) {
       console.error("Upgrade failed:", err);
       alert("Could not start Shopify upgrade. Please try from the Settings page.");
+    }
+  }
+
+  // Demo form submit
+  async function submitDemo(e) {
+    e.preventDefault();
+    setDemoErr("");
+    setDemoDone(false);
+
+    const emailOk = /\S+@\S+\.\S+/.test(demoEmail);
+    if (!demoName || !emailOk) {
+      setDemoErr("Please enter a valid name and email.");
+      return;
+    }
+
+    try {
+      setDemoBusy(true);
+      const res = await fetch("/api/demo/request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: demoName,
+          email: demoEmail,
+          source: isEmbedded ? "shopify-embedded" : "public-site",
+          host,
+        }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j?.error || "Failed to send");
+      }
+      setDemoDone(true);
+      setDemoName("");
+      setDemoEmail("");
+    } catch (err) {
+      console.error(err);
+      setDemoErr("Could not send your request. Please try again in a moment.");
+    } finally {
+      setDemoBusy(false);
     }
   }
 
@@ -161,7 +206,6 @@ export default function Home() {
       <section id="pricing" className="py-16 text-center max-w-5xl mx-auto">
         <h3 className="text-3xl font-bold mb-12">Pricing</h3>
 
-        {/* Cards: Starter (Monthly), Pro (Monthly), Annual (2 months free) */}
         <div className="grid md:grid-cols-3 gap-8">
           {/* Starter Monthly */}
           <div className="bg-gray-800 p-6 rounded shadow">
@@ -228,26 +272,75 @@ export default function Home() {
         </div>
       </section>
 
+      {/* Demo form */}
       <section id="demo" className="py-16 text-center max-w-md mx-auto">
         <h3 className="text-3xl font-bold mb-6">Request a Demo</h3>
-        <form className="space-y-4">
+
+        {demoDone && (
+          <div className="mb-4 rounded bg-emerald-900/30 border border-emerald-700 p-3 text-sm text-emerald-200">
+            Thanks! We’ll be in touch shortly.
+          </div>
+        )}
+        {demoErr && (
+          <div className="mb-4 rounded bg-red-900/30 border border-red-700 p-3 text-sm text-red-200">
+            {demoErr}
+          </div>
+        )}
+
+        <form className="space-y-4" onSubmit={submitDemo}>
           <input
             type="text"
             placeholder="Your Name"
             className="w-full px-4 py-2 rounded text-black"
+            value={demoName}
+            onChange={(e) => setDemoName(e.target.value)}
             required
           />
           <input
             type="email"
             placeholder="Your Email"
             className="w-full px-4 py-2 rounded text-black"
+            value={demoEmail}
+            onChange={(e) => setDemoEmail(e.target.value)}
             required
           />
-          <button className="bg-green-500 hover:bg-green-600 px-6 py-3 rounded text-black font-semibold w-full">
-            Request Demo
+          <button
+            disabled={demoBusy}
+            className={`px-6 py-3 rounded text-black font-semibold w-full ${
+              demoBusy ? "bg-green-300 cursor-not-allowed" : "bg-green-500 hover:bg-green-600"
+            }`}
+          >
+            {demoBusy ? "Sending…" : "Request Demo"}
           </button>
         </form>
       </section>
+
+      {/* Footer with Terms & Privacy */}
+      <footer className="mt-16 border-t border-gray-800 py-8">
+        <div className="max-w-5xl mx-auto flex flex-col md:flex-row items-center justify-between gap-3 text-sm text-gray-400">
+          <span>© {new Date().getFullYear()} Ghost Stock</span>
+          <nav className="flex items-center gap-4">
+            <a
+              href={TERMS_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => openExternal(TERMS_URL, e)}
+              className="hover:text-gray-200 underline-offset-4 hover:underline"
+            >
+              Terms
+            </a>
+            <a
+              href={PRIVACY_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => openExternal(PRIVACY_URL, e)}
+              className="hover:text-gray-2 00 underline-offset-4 hover:underline"
+            >
+              Privacy
+            </a>
+          </nav>
+        </div>
+      </footer>
     </main>
   );
 }
