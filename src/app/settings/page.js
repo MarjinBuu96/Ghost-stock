@@ -6,7 +6,7 @@ import { fetcher } from "@/lib/fetcher";
 
 export default function SettingsPage() {
   // --- App Bridge host detection (URL first, cookie fallback) ---
-  const [host, setHost] = useState(null);
+  const [host, setHost] = useState<string | null>(null);
   const isEmbedded = !!host;
 
   useEffect(() => {
@@ -27,7 +27,7 @@ export default function SettingsPage() {
 
   // Shopify connect form (only shown when NOT embedded)
   const [shop, setShop] = useState("");
-  const startInstall = (e) => {
+  const startInstall = (e: React.FormEvent) => {
     e.preventDefault();
     if (!shop) return;
     window.location.href = `/api/shopify/install?shop=${encodeURIComponent(
@@ -39,11 +39,31 @@ export default function SettingsPage() {
   const { data, error, isLoading, mutate } = useSWR("/api/settings", fetcher);
   const settings = data?.settings || {};
 
-  // Plans: starter / pro only
+  // ==== Plans: support monthly + annual ====
   const planRaw = String(settings?.plan || "starter").toLowerCase();
-  const normalizedPlan = ["starter", "pro"].includes(planRaw) ? planRaw : "starter";
-  const isStarter = normalizedPlan === "starter";
-  const canUseIntegrations = normalizedPlan === "pro";
+  const allowedPlans = ["starter", "starter_annual", "pro", "pro_annual"] as const;
+  type PlanKey = (typeof allowedPlans)[number];
+  const normalizedPlan: PlanKey = (allowedPlans.includes(planRaw)
+    ? planRaw
+    : "starter") as PlanKey;
+
+  const isStarter = normalizedPlan.startsWith("starter");
+  const canUseIntegrations = normalizedPlan.startsWith("pro");
+
+  const prettyPlan = (p: PlanKey) => {
+    switch (p) {
+      case "starter":
+        return "Starter (Monthly)";
+      case "starter_annual":
+        return "Starter (Annual)";
+      case "pro":
+        return "Pro (Monthly)";
+      case "pro_annual":
+        return "Pro (Annual)";
+      default:
+        return p.toUpperCase();
+    }
+  };
 
   // Form state
   const [slackUrl, setSlackUrl] = useState("");
@@ -67,7 +87,9 @@ export default function SettingsPage() {
     const billingError = params.get("billing");
 
     if (chargeId) {
-      fetch(`/api/shopify/billing/confirm?charge_id=${chargeId}`, { method: "GET" })
+      fetch(`/api/shopify/billing/confirm?charge_id=${chargeId}`, {
+        method: "GET",
+      })
         .then(() => {
           mutate(); // Refresh settings
           window.history.replaceState({}, "", window.location.pathname); // Clean URL
@@ -81,13 +103,13 @@ export default function SettingsPage() {
 
   const currency = settings?.currency || "GBP";
 
-  function notify(msg) {
+  function notify(msg: string) {
     setToast(msg);
-    clearTimeout(notify._t);
-    notify._t = setTimeout(() => setToast(""), 3000);
+    clearTimeout((notify as any)._t);
+    (notify as any)._t = setTimeout(() => setToast(""), 3000);
   }
 
-  async function changeCurrency(newCcy) {
+  async function changeCurrency(newCcy: string) {
     try {
       setCurrencySaving(true);
       const res = await fetch("/api/settings", {
@@ -133,7 +155,11 @@ export default function SettingsPage() {
       });
       if (!res.ok) throw new Error("Failed");
       await mutate();
-      notify(notificationEmail ? "Notification email saved" : "Notification email cleared");
+      notify(
+        notificationEmail
+          ? "Notification email saved"
+          : "Notification email cleared"
+      );
     } catch {
       notify("Could not save notification email");
     } finally {
@@ -141,19 +167,26 @@ export default function SettingsPage() {
     }
   }
 
-  // Shopify Billing actions (starter/pro only)
-  async function goShopifyUpgrade(plan) {
+  // ==== Shopify Billing actions (now supports 4 plan keys) ====
+  async function goShopifyUpgrade(plan: PlanKey) {
     try {
       setBillingBusy(true);
-      const safePlan = plan === "pro" ? "pro" : "starter";
-      const res = await fetch(`/api/shopify/billing/upgrade?host=${host || ""}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ plan: safePlan }),
-      });
+      const safePlan: PlanKey = (allowedPlans.includes(plan)
+        ? plan
+        : "starter") as PlanKey;
+
+      const res = await fetch(
+        `/api/shopify/billing/upgrade?host=${host || ""}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ plan: safePlan }),
+        }
+      );
 
       const json = await res.json().catch(() => ({}));
-      if (!res.ok || !json?.confirmationUrl) throw new Error(json?.error || "Upgrade failed");
+      if (!res.ok || !json?.confirmationUrl)
+        throw new Error(json?.error || "Upgrade failed");
 
       // Open Shopify billing confirmation outside iframe
       window.open(json.confirmationUrl, "_blank", "noopener,noreferrer");
@@ -164,19 +197,23 @@ export default function SettingsPage() {
     }
   }
 
-  const showUpgradeStarter = normalizedPlan === "pro";
-  const showUpgradePro = normalizedPlan === "starter";
+  const showUpgradeToStarter = !normalizedPlan.startsWith("starter");
+  const showUpgradeToPro = !normalizedPlan.startsWith("pro");
 
   return (
     <main className="min-h-screen px-6 py-10 max-w-3xl mx-auto text-white">
       <h2 className="text-3xl font-bold mb-6">Settings</h2>
 
-      {toast && <div className="mb-4 rounded bg-gray-800 px-4 py-2 text-sm">{toast}</div>}
+      {toast && (
+        <div className="mb-4 rounded bg-gray-800 px-4 py-2 text-sm">{toast}</div>
+      )}
 
       {error && (
         <div className="mb-6 rounded border border-red-700 bg-red-900/30 p-4">
           <p className="text-red-200 font-semibold">Could not load settings</p>
-          <p className="text-xs text-red-200/80 mt-2">{String(error.message)}</p>
+          <p className="text-xs text-red-200/80 mt-2">
+            {String(error.message)}
+          </p>
         </div>
       )}
 
@@ -189,7 +226,8 @@ export default function SettingsPage() {
           </p>
           <form onSubmit={startInstall} className="space-y-3">
             <label className="block text-sm" htmlFor="shop-input">
-              Shop domain (e.g. <span className="opacity-80">my-store.myshopify.com</span>)
+              Shop domain (e.g.{" "}
+              <span className="opacity-80">my-store.myshopify.com</span>)
             </label>
             <input
               id="shop-input"
@@ -207,43 +245,77 @@ export default function SettingsPage() {
       )}
 
       {/* Billing via Shopify */}
-      <section id="billing" className="mb-8 rounded border border-gray-700 bg-gray-900 p-5">
+      <section
+        id="billing"
+        className="mb-8 rounded border border-gray-700 bg-gray-900 p-5"
+      >
         <div className="flex items-start justify-between gap-4">
           <div>
             <h3 className="text-xl font-semibold">Subscription</h3>
             <p className="text-gray-400 text-sm mt-1">
-              Current plan: <span className="font-medium uppercase">{isLoading ? "…" : normalizedPlan}</span>
+              Current plan:{" "}
+              <span className="font-medium">
+                {isLoading ? "…" : prettyPlan(normalizedPlan)}
+              </span>
             </p>
             <p className="text-xs text-gray-500 mt-1">
-              Plan changes are handled inside Shopify (you’ll see a standard approval screen).
+              Plan changes are handled inside Shopify (you’ll see a standard
+              approval screen).
             </p>
           </div>
 
+          {/* Upgrade buttons: Monthly + Annual */}
           <div className="flex flex-wrap gap-2">
-            {showUpgradeStarter && (
-              <button
-                onClick={() => goShopifyUpgrade("starter")}
-                disabled={billingBusy}
-                className="rounded bg-emerald-500 hover:bg-emerald-600 text-black px-3 py-2 text-sm font-semibold disabled:opacity-60"
-              >
-                Switch to Starter
-              </button>
+            {showUpgradeToStarter && (
+              <>
+                <button
+                  onClick={() => goShopifyUpgrade("starter")}
+                  disabled={billingBusy}
+                  className="rounded bg-emerald-500 hover:bg-emerald-600 text-black px-3 py-2 text-sm font-semibold disabled:opacity-60"
+                >
+                  Starter (Monthly)
+                </button>
+                <button
+                  onClick={() => goShopifyUpgrade("starter_annual")}
+                  disabled={billingBusy}
+                  className="rounded bg-emerald-700 hover:bg-emerald-800 text-white px-3 py-2 text-sm font-semibold disabled:opacity-60"
+                  title="2 months free"
+                >
+                  Starter (Annual – 2 months free)
+                </button>
+              </>
             )}
-            {showUpgradePro && (
-              <button
-                onClick={() => goShopifyUpgrade("pro")}
-                disabled={billingBusy}
-                className="rounded bg-indigo-500 hover:bg-indigo-600 text-black px-3 py-2 text-sm font-semibold disabled:opacity-60"
-              >
-                Upgrade to Pro
-              </button>
+            {showUpgradeToPro && (
+              <>
+                <button
+                  onClick={() => goShopifyUpgrade("pro")}
+                  disabled={billingBusy}
+                  className="rounded bg-indigo-500 hover:bg-indigo-600 text-black px-3 py-2 text-sm font-semibold disabled:opacity-60"
+                >
+                  Pro (Monthly)
+                </button>
+                <button
+                  onClick={() => goShopifyUpgrade("pro_annual")}
+                  disabled={billingBusy}
+                  className="rounded bg-indigo-700 hover:bg-indigo-800 text-white px-3 py-2 text-sm font-semibold disabled:opacity-60"
+                  title="2 months free"
+                >
+                  Pro (Annual – 2 months free)
+                </button>
+              </>
             )}
           </div>
         </div>
 
         <ul className="mt-4 text-sm text-gray-300 list-disc pl-5 space-y-1">
-          <li><span className="font-medium">Starter:</span> Manual scans, dashboard KPIs, CSV export.</li>
-          <li><span className="font-medium">Pro:</span> Auto-scans, Slack/Email alerts, priority support.</li>
+          <li>
+            <span className="font-medium">Starter:</span> Manual scans, dashboard
+            KPIs, CSV export.
+          </li>
+          <li>
+            <span className="font-medium">Pro:</span> Auto-scans, Slack/Email
+            alerts, priority support.
+          </li>
         </ul>
       </section>
 
@@ -279,7 +351,9 @@ export default function SettingsPage() {
             </button>
             <button
               onClick={async () => {
-                const r = await fetch("/api/integrations/slack/test", { method: "POST" });
+                const r = await fetch("/api/integrations/slack/test", {
+                  method: "POST",
+                });
                 alert(r.ok ? "Alert sent to Slack ✅" : "Slack alert failed");
               }}
               disabled={!canUseIntegrations || !slackUrl}
@@ -291,7 +365,9 @@ export default function SettingsPage() {
           {!canUseIntegrations && (
             <div className="text-xs text-gray-400">
               Upgrade to{" "}
-              <button className="underline" onClick={() => goShopifyUpgrade("pro")}>Pro</button>{" "}
+              <button className="underline" onClick={() => goShopifyUpgrade("pro")}>
+                Pro
+              </button>{" "}
               to enable Slack alerts.
             </div>
           )}
@@ -324,7 +400,9 @@ export default function SettingsPage() {
             </button>
             <button
               onClick={async () => {
-                const r = await fetch("/api/integrations/email/test", { method: "POST" });
+                const r = await fetch("/api/integrations/email/test", {
+                  method: "POST",
+                });
                 alert(r.ok ? "Alert sent by email ✅" : "Email alert failed");
               }}
               disabled={!canUseIntegrations || !notificationEmail}
@@ -336,7 +414,9 @@ export default function SettingsPage() {
           {!canUseIntegrations && (
             <div className="text-xs text-gray-400">
               Upgrade to{" "}
-              <button className="underline" onClick={() => goShopifyUpgrade("pro")}>Pro</button>{" "}
+              <button className="underline" onClick={() => goShopifyUpgrade("pro")}>
+                Pro
+              </button>{" "}
               to enable email alerts.
             </div>
           )}
@@ -364,7 +444,9 @@ export default function SettingsPage() {
             <option value="CAD">CAD</option>
             <option value="NZD">NZD</option>
           </select>
-          {currencySaving && <span className="text-xs text-gray-400">Saving…</span>}
+          {currencySaving && (
+            <span className="text-xs text-gray-400">Saving…</span>
+          )}
         </div>
         <p className="text-xs text-gray-500 mt-3">
           Affects how amounts are displayed (e.g., at-risk revenue).
@@ -375,7 +457,11 @@ export default function SettingsPage() {
       <details className="mt-8">
         <summary className="cursor-pointer text-sm text-gray-400">Debug</summary>
         <pre className="mt-2 text-xs text-gray-300 bg-gray-800 rounded p-3 overflow-auto">
-{JSON.stringify({ isLoading, settings, normalizedPlan, slackUrl, notificationEmail, host, isEmbedded }, null, 2)}
+{JSON.stringify(
+  { isLoading, settings, normalizedPlan, slackUrl, notificationEmail, host, isEmbedded },
+  null,
+  2
+)}
         </pre>
       </details>
     </main>

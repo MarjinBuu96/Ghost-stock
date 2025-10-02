@@ -66,7 +66,7 @@ export default function Home() {
             href="#demo"
             className="bg-green-500 hover:bg-green-600 px-6 py-3 rounded text-black font-semibold"
           >
-            Book a Demo
+            Start 14-day Free Trial
           </a>
           <a
             href="#how"
@@ -120,11 +120,18 @@ export default function Home() {
       {/* Pricing + Demo */}
       <section id="pricing" className="py-16 text-center max-w-5xl mx-auto">
         <h3 className="text-3xl font-bold mb-12">Pricing</h3>
+
+        {/* Cards: Starter (Monthly), Pro (Monthly), Annual (2 months free) */}
         <div className="grid md:grid-cols-3 gap-8">
+          {/* Starter Monthly */}
           <div className="bg-gray-800 p-6 rounded shadow">
-            <h4 className="text-xl font-semibold mb-4">Starter</h4>
-            <p className="text-green-400 text-2xl font-bold mb-4">£9.99/mo</p>
-            <p className="mb-6">3 manual scans/week, Shopify integration</p>
+            <h4 className="text-xl font-semibold mb-1">Starter</h4>
+            <p className="text-green-400 text-2xl font-bold">£14.99/mo</p>
+            <p className="text-xs text-gray-400 mb-3">14-day free trial • Billed after day 14</p>
+            <p className="mb-2 text-sm">All features gated. Upgrade anytime.</p>
+            <p className="mb-6 text-xs text-emerald-300">
+              First 20 installs: <span className="font-semibold">£9.99/mo</span> — grandfathered while installed
+            </p>
             <a
               href="#demo"
               className="bg-green-500 hover:bg-green-600 px-4 py-2 rounded text-black font-semibold inline-block"
@@ -132,9 +139,12 @@ export default function Home() {
               Get Started
             </a>
           </div>
+
+          {/* Pro Monthly */}
           <div className="bg-gray-800 p-6 rounded shadow border border-green-500">
-            <h4 className="text-xl font-semibold mb-4">Pro</h4>
-            <p className="text-green-400 text-2xl font-bold mb-4">£29/mo</p>
+            <h4 className="text-xl font-semibold mb-1">Pro</h4>
+            <p className="text-green-400 text-2xl font-bold">£29/mo</p>
+            <p className="text-xs text-gray-400 mb-3">Annual option available — 2 months free</p>
             <p className="mb-6">
               Multi-location tracking, ghost stock prediction, auto daily scans & more
             </p>
@@ -142,7 +152,24 @@ export default function Home() {
               href="#demo"
               className="bg-green-500 hover:bg-green-600 px-4 py-2 rounded text-black font-semibold inline-block"
             >
-              Get Started
+              Start Pro
+            </a>
+          </div>
+
+          {/* Annual (2 months free) */}
+          <div className="bg-gray-800 p-6 rounded shadow">
+            <h4 className="text-xl font-semibold mb-1">Annual — 2 months free</h4>
+            <div className="space-y-2 mb-4">
+              <p className="text-green-400 text-lg font-semibold">Starter: £149.90/yr</p>
+              <p className="text-green-400 text-lg font-semibold">Pro: £290/yr</p>
+            </div>
+            <p className="text-xs text-gray-400 mb-6">Billed annually (equivalent to 10 months)</p>
+            <a
+              href="#demo"
+              className="border border-gray-400 hover:bg-gray-800 px-4 py-2 rounded font-semibold inline-block"
+              title="Ask for Annual billing in your demo"
+            >
+              Ask About Annual
             </a>
           </div>
         </div>

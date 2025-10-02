@@ -152,10 +152,15 @@ model Store {
   updatedAt   DateTime  @updatedAt
   lastScanAt  DateTime?
 
+  // NEW: grandfather pricing lock (first 20 installs @ £9.99 while installed)
+  grandfathered Boolean  @default(false)
+
   alerts Alert[]
 
   @@index([userEmail])
+  @@index([grandfathered]) // (optional, useful for analytics)
 }
+
 
 model OAuthState {
   state     String   @id // random UUID, unique
