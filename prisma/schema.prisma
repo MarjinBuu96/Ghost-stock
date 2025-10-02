@@ -45,6 +45,9 @@ model UserSettings {
   lastScanReset     DateTime @default(now()) // 
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
+  lowStockThreshold Int       @default(5)
+  useMultiLocation  Boolean   @default(false)   // Only honored for Pro plans
+  locationIds       String[]  @default([])      // Shopify GIDs, e.g. ["gid://shopify/Location/123"]
 }
 
 model Organization {

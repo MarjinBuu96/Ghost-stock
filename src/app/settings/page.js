@@ -46,7 +46,8 @@ export default function SettingsPage() {
   const normalizedPlan = allowedPlans.includes(planRaw) ? planRaw : "starter";
 
   const isStarter = normalizedPlan.startsWith("starter");
-  const canUseIntegrations = normalizedPlan.startsWith("pro");
+  const isPro = normalizedPlan.startsWith("pro");
+  const canUseIntegrations = isPro;
 
   const prettyPlan = (p) => {
     switch (p) {
@@ -62,6 +63,54 @@ export default function SettingsPage() {
         return String(p).toUpperCase();
     }
   };
+
+  // ---------- NEW: Inventory prefs (threshold + multi-location) ----------
+  // Server values (with fallbacks)
+  const serverThreshold = Number(settings?.lowStockThreshold ?? 5);
+  const serverUseMultiLoc = !!settings?.useMultiLocation;
+  const serverLocIds = Array.isArray(settings?.locationIds) ? settings.locationIds : [];
+
+  // Local UI state
+  const [threshold, setThreshold] = useState(serverThreshold);
+  const [multiLoc, setMultiLoc] = useState(serverUseMultiLoc);
+  const [locIds, setLocIds] = useState(serverLocIds);
+
+  // Keep local state in sync when settings refresh
+  useEffect(() => {
+    setThreshold(serverThreshold);
+    setMultiLoc(serverUseMultiLoc);
+    setLocIds(serverLocIds);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serverThreshold, serverUseMultiLoc, settings?.locationIds?.length]);
+
+  // Load Shopify locations ONLY for Pro (and when we have host)
+  const { data: locData } = useSWR(
+    isPro && host ? `/api/shopify/locations?host=${encodeURIComponent(host)}` : null,
+    fetcher
+  );
+  const locations = locData?.locations ?? [];
+
+  async function saveInventoryPrefs() {
+    try {
+      const res = await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          lowStockThreshold: Number.isFinite(Number(threshold))
+            ? Math.max(0, Math.floor(Number(threshold)))
+            : 0,
+          useMultiLocation: !!multiLoc,
+          locationIds: Array.isArray(locIds) ? locIds : [],
+        }),
+      });
+      if (!res.ok) throw new Error("Failed");
+      await mutate();
+      notify("Inventory preferences saved");
+    } catch {
+      notify("Could not save inventory preferences");
+    }
+  }
+  // ----------------------------------------------------------------------
 
   // Form state
   const [slackUrl, setSlackUrl] = useState("");
@@ -97,7 +146,8 @@ export default function SettingsPage() {
 
     if (upgraded) notify("Your subscription has been updated 🎉");
     if (billingError) notify("Billing error: " + billingError);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const currency = settings?.currency || "GBP";
 
@@ -311,8 +361,98 @@ export default function SettingsPage() {
         </ul>
       </section>
 
+      {/* NEW: Inventory Alerts */}
+      <section id="inventory-prefs" className="rounded border border-gray-700 bg-gray-900 p-5 mt-8">
+        <h3 className="text-xl font-semibold">Inventory Alerts</h3>
+        <div className="mt-4 flex items-center gap-3">
+          <label htmlFor="threshold" className="text-sm text-gray-400 w-48">
+            Low-stock threshold
+          </label>
+          <input
+            id="threshold"
+            type="number"
+            min={0}
+            value={threshold}
+            onChange={(e) => setThreshold(Math.max(0, Number(e.target.value || 0)))}
+            className="bg-gray-800 rounded px-3 py-2 text-sm w-28"
+          />
+          <span className="text-xs text-gray-500">Alert when total available ≤ threshold</span>
+        </div>
+        <div className="mt-4">
+          <button
+            onClick={saveInventoryPrefs}
+            className="bg-green-500 hover:bg-green-600 text-black px-4 py-2 rounded font-semibold text-sm"
+          >
+            Save
+          </button>
+        </div>
+      </section>
+
+      {/* NEW: Locations (Pro) */}
+      <section id="locations" className="rounded border border-gray-700 bg-gray-900 p-5 mt-8">
+        <h3 className="text-xl font-semibold">Locations (Pro)</h3>
+        <p className="text-sm text-gray-400">
+          Sum inventory across selected locations for alerts and scans.
+        </p>
+
+        <div className={`mt-4 space-y-3 ${!isPro ? "opacity-60" : ""}`}>
+          <label className="flex items-center gap-3">
+            <input
+              type="checkbox"
+              checked={multiLoc}
+              disabled={!isPro}
+              onChange={(e) => setMultiLoc(e.target.checked)}
+            />
+            <span className="text-sm">Enable multi-location</span>
+          </label>
+
+          {multiLoc && (
+            <div className="pl-6">
+              {locations.length === 0 ? (
+                <p className="text-xs text-gray-400">No locations found.</p>
+              ) : (
+                <div className="grid sm:grid-cols-2 gap-2">
+                  {locations.map((loc) => {
+                    const checked = locIds.includes(loc.id);
+                    return (
+                      <label key={loc.id} className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(e) => {
+                            if (e.target.checked) setLocIds([...new Set([...locIds, loc.id])]);
+                            else setLocIds(locIds.filter((x) => x !== loc.id));
+                          }}
+                          disabled={!isPro}
+                        />
+                        <span className="text-sm">{loc.name}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          <div>
+            <button
+              onClick={saveInventoryPrefs}
+              disabled={!isPro}
+              className="bg-green-500 hover:bg-green-600 disabled:opacity-60 text-black px-4 py-2 rounded font-semibold text-sm"
+            >
+              Save
+            </button>
+            {!isPro && (
+              <span className="ml-3 text-xs text-gray-400">
+                Upgrade to Pro to enable multi-location.
+              </span>
+            )}
+          </div>
+        </div>
+      </section>
+
       {/* Integrations — visible; locked on Starter */}
-      <section className="mb-8 rounded border border-gray-700 bg-gray-900 p-5">
+      <section id="integrations" className="mb-8 rounded border border-gray-700 bg-gray-900 p-5 mt-8">
         <h3 className="text-xl font-semibold">Integrations</h3>
         <p className="text-sm text-gray-400">Receive alerts via Slack or Email.</p>
 
@@ -448,7 +588,19 @@ export default function SettingsPage() {
         <summary className="cursor-pointer text-sm text-gray-400">Debug</summary>
         <pre className="mt-2 text-xs text-gray-300 bg-gray-800 rounded p-3 overflow-auto">
 {JSON.stringify(
-  { isLoading, settings, normalizedPlan, slackUrl, notificationEmail, host, isEmbedded },
+  {
+    isLoading,
+    plan: normalizedPlan,
+    settings,
+    threshold,
+    multiLoc,
+    locIds,
+    locationsCount: locations.length || 0,
+    slackUrl,
+    notificationEmail,
+    host,
+    isEmbedded
+  },
   null,
   2
 )}
