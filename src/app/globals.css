@@ -1,36 +1,54 @@
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* optional: nicer default font */
+/* ---------- Base ---------- */
 :root { color-scheme: dark; }
-body { @apply bg-gray-900 text-white; }
+/* Let pages control background via .gs-page; keep text color here */
+body { @apply text-white; }
 
-
-@import "tailwindcss";
-
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/* ---------- Ghost Stock theme ---------- */
+@layer base {
+  :root { --gs-bg: #0b0f14; }
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+@layer components {
+  /* page + container + sections */
+  .gs-page { @apply min-h-screen bg-[var(--gs-bg)] text-white; }
+  .gs-container { @apply max-w-6xl mx-auto px-6; }
+  .gs-hero { @apply pt-16 pb-12; }
+  .gs-section { @apply py-12; }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+  /* cards */
+  .gs-card { @apply bg-gray-900/50 border border-gray-800 rounded-2xl p-6; }
+  .gs-subcard { @apply bg-gray-900/60 border border-gray-800 rounded-lg p-4; }
+
+  /* badge */
+  .gs-kicker {
+    @apply inline-block text-xs tracking-wide uppercase
+           text-emerald-300/80 bg-emerald-900/30 border border-emerald-800
+           px-2 py-1 rounded;
   }
-}
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  /* buttons */
+  .gs-btn { @apply inline-flex items-center justify-center font-semibold rounded transition-colors; }
+  .gs-btn-primary { @apply gs-btn bg-emerald-400 hover:bg-emerald-300 text-black px-5 py-3; }
+  .gs-btn-secondary { @apply gs-btn border border-gray-700 hover:bg-gray-800 text-white px-5 py-3; }
+  .gs-btn-ghost { @apply gs-btn bg-gray-700 hover:bg-gray-600 text-white px-4 py-2; }
+  .gs-btn-purple { @apply gs-btn bg-purple-500 hover:bg-purple-600 text-black px-4 py-2; }
+  .gs-btn-green { @apply gs-btn bg-green-500 hover:bg-green-600 text-black px-4 py-2; }
+
+  /* inputs */
+  .gs-input { @apply w-full bg-gray-800 rounded px-3 py-2 text-sm placeholder-gray-400; }
+  .gs-select { @apply w-full bg-gray-800 rounded px-3 py-2 text-sm; }
+  .gs-textarea { @apply w-full bg-gray-800 rounded px-3 py-2 text-sm; }
+
+  /* table shell */
+  .gs-table-wrap { @apply overflow-x-auto rounded-lg ring-1 ring-gray-700; }
+  .gs-th { @apply text-left px-4 py-2; }
+  .gs-td { @apply px-4 py-2; }
+
+  /* divider + footer */
+  .gs-divider { @apply border-t border-gray-800; }
+  .gs-footer { @apply border-t border-gray-800 py-12; }
 }
