@@ -201,3 +201,18 @@ model PartnerApplication {
   @@index([email, createdAt])
   @@index([status, createdAt])
 }
+
+model PartnerLead {
+  id           String   @id @default(cuid())
+  createdAt    DateTime @default(now())
+  name         String
+  email        String
+  agency       String?
+  website      String?
+  verticals    String?
+  volume       String?
+  notes        String?
+  utmSource    String?
+  utmMedium    String?
+  utmCampaign  String?
+}
