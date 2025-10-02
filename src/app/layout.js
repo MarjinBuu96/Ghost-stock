@@ -14,16 +14,11 @@ export default function RootLayout({ children }) {
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        {/* Lets Shopify read the key in-iframe if needed */}
         <meta
           name="shopify-api-key"
           content={process.env.NEXT_PUBLIC_SHOPIFY_API_KEY || "5860dca7a3c5d0818a384115d221179a"}
         />
-
-        {/* App Bridge CDN FIRST (sync) so the inline bootstrap can see it */}
         <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
-
-        {/* App Bridge bootstrap + host cookie persist */}
         <script
           dangerouslySetInnerHTML={{
             __html: `
@@ -32,13 +27,9 @@ export default function RootLayout({ children }) {
                   var qs = new URLSearchParams(window.location.search);
                   var host = qs.get('host') || (document.cookie.match(/(?:^|;\\s*)shopifyHost=([^;]+)/) || [])[1] || '';
                   if (!host) return;
-
-                  // Persist host for billing/routes
                   document.cookie = 'shopifyHost=' + host + '; path=/; SameSite=None; Secure';
-
                   var AB = window['app-bridge'] || window.appBridge || null;
                   if (!AB || !AB.createApp) return;
-
                   if (!window.__SHOPIFY_APP__) {
                     window.__SHOPIFY_APP__ = AB.createApp({
                       apiKey: '${process.env.NEXT_PUBLIC_SHOPIFY_API_KEY || "5860dca7a3c5d0818a384115d221179a"}',
@@ -54,11 +45,16 @@ export default function RootLayout({ children }) {
           }}
         />
       </head>
-
-      {/* Use the unified theme class from globals.css */}
       <body className="gs-page">
         <noscript>
-          <div style="background:#111;color:#fff;padding:8px 12px;text-align:center;">
+          <div
+            style={{
+              background: "#111",
+              color: "#fff",
+              padding: "8px 12px",
+              textAlign: "center",
+            }}
+          >
             This app works best with JavaScript enabled.
           </div>
         </noscript>
