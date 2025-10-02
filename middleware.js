@@ -3,60 +3,61 @@ import { NextResponse } from "next/server";
 
 const PUBLIC_FILE = /\.(.*)$/;
 
-// Apply headers that allow embedding in Shopify Admin
-function withEmbedHeaders(res) {
-  try {
-    res.headers.delete("X-Frame-Options");
-    res.headers.delete("x-frame-options");
-  } catch {}
-  res.headers.set(
-    "Content-Security-Policy",
-    "frame-ancestors 'self' https://admin.shopify.com https://*.myshopify.com;"
-  );
-  res.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
-  return res;
-}
+// Reuse this policy everywhere (you can append your other directives if you want)
+const EMBED_CSP =
+  "default-src 'self' https: data: blob:; " +
+  "script-src 'self' 'unsafe-inline' 'unsafe-eval' https: blob:; " +
+  "style-src 'self' 'unsafe-inline' https:; " +
+  "img-src 'self' https: data: blob:; " +
+  "font-src 'self' https: data:; " +
+  "connect-src 'self' https: wss:; " +
+  "frame-ancestors https://*.myshopify.com https://admin.shopify.com https://*.shopify.com";
 
 export function middleware(req) {
   const { nextUrl, cookies } = req;
   const { pathname, searchParams } = nextUrl;
 
-  // Let Next internals/static pass through
+  // Skip Next internals, API routes, and static files
   if (
     pathname.startsWith("/_next") ||
+    pathname.startsWith("/api") ||
     pathname.startsWith("/favicon") ||
     PUBLIC_FILE.test(pathname)
   ) {
     return NextResponse.next();
   }
 
+  // Persist Shopify host param (so embeds/billing work after navigation)
   const hostFromUrl = searchParams.get("host");
-  const hostFromCookie = cookies.get("shopifyHost")?.value || null;
+  const hostFromCookie = cookies.get("shopifyHost")?.value;
 
-  // If URL already has host: persist it and continue
   if (hostFromUrl) {
-    const res = withEmbedHeaders(NextResponse.next());
-    // Important: cookies inside an iframe need SameSite=None; Secure
+    const res = NextResponse.next();
     res.cookies.set("shopifyHost", hostFromUrl, {
       path: "/",
-      sameSite: "none",
+      sameSite: "lax",
       secure: true,
     });
+    // ✅ Ensure CSP on this response too
+    res.headers.set("content-security-policy", EMBED_CSP);
     return res;
   }
 
-  // No host in URL but we have a cookie → redirect to same URL with host
   if (hostFromCookie) {
     const url = nextUrl.clone();
     url.searchParams.set("host", hostFromCookie);
-    return withEmbedHeaders(NextResponse.redirect(url));
+    // Redirect will be followed by a new request; still set CSP on the redirect itself for consistency
+    const res = NextResponse.redirect(url);
+    res.headers.set("content-security-policy", EMBED_CSP);
+    return res;
   }
 
-  // Public pages (no host anywhere)
-  return withEmbedHeaders(NextResponse.next());
+  // Normal flow: attach CSP for ALL page responses (including 4xx)
+  const res = NextResponse.next();
+  res.headers.set("content-security-policy", EMBED_CSP);
+  return res;
 }
 
 export const config = {
-  // Run on everything except _next assets and files
-  matcher: ["/((?!_next/|.*\\..*).*)"],
+  matcher: ["/((?!_next/|api/|.*\\..*).*)"],
 };
