@@ -1,3 +1,4 @@
+// src/app/settings/page.js
 "use client";
 
 import useSWR from "swr";
@@ -6,7 +7,7 @@ import { fetcher } from "@/lib/fetcher";
 
 export default function SettingsPage() {
   // --- App Bridge host detection (URL first, cookie fallback) ---
-  const [host, setHost] = useState<string | null>(null);
+  const [host, setHost] = useState(null);
   const isEmbedded = !!host;
 
   useEffect(() => {
@@ -27,7 +28,7 @@ export default function SettingsPage() {
 
   // Shopify connect form (only shown when NOT embedded)
   const [shop, setShop] = useState("");
-  const startInstall = (e: React.FormEvent) => {
+  const startInstall = (e) => {
     e.preventDefault();
     if (!shop) return;
     window.location.href = `/api/shopify/install?shop=${encodeURIComponent(
@@ -41,16 +42,13 @@ export default function SettingsPage() {
 
   // ==== Plans: support monthly + annual ====
   const planRaw = String(settings?.plan || "starter").toLowerCase();
-  const allowedPlans = ["starter", "starter_annual", "pro", "pro_annual"] as const;
-  type PlanKey = (typeof allowedPlans)[number];
-  const normalizedPlan: PlanKey = (allowedPlans.includes(planRaw)
-    ? planRaw
-    : "starter") as PlanKey;
+  const allowedPlans = ["starter", "starter_annual", "pro", "pro_annual"];
+  const normalizedPlan = allowedPlans.includes(planRaw) ? planRaw : "starter";
 
   const isStarter = normalizedPlan.startsWith("starter");
   const canUseIntegrations = normalizedPlan.startsWith("pro");
 
-  const prettyPlan = (p: PlanKey) => {
+  const prettyPlan = (p) => {
     switch (p) {
       case "starter":
         return "Starter (Monthly)";
@@ -61,7 +59,7 @@ export default function SettingsPage() {
       case "pro_annual":
         return "Pro (Annual)";
       default:
-        return p.toUpperCase();
+        return String(p).toUpperCase();
     }
   };
 
@@ -103,13 +101,13 @@ export default function SettingsPage() {
 
   const currency = settings?.currency || "GBP";
 
-  function notify(msg: string) {
+  function notify(msg) {
     setToast(msg);
-    clearTimeout((notify as any)._t);
-    (notify as any)._t = setTimeout(() => setToast(""), 3000);
+    clearTimeout(notify._t);
+    notify._t = setTimeout(() => setToast(""), 3000);
   }
 
-  async function changeCurrency(newCcy: string) {
+  async function changeCurrency(newCcy) {
     try {
       setCurrencySaving(true);
       const res = await fetch("/api/settings", {
@@ -156,9 +154,7 @@ export default function SettingsPage() {
       if (!res.ok) throw new Error("Failed");
       await mutate();
       notify(
-        notificationEmail
-          ? "Notification email saved"
-          : "Notification email cleared"
+        notificationEmail ? "Notification email saved" : "Notification email cleared"
       );
     } catch {
       notify("Could not save notification email");
@@ -167,13 +163,11 @@ export default function SettingsPage() {
     }
   }
 
-  // ==== Shopify Billing actions (now supports 4 plan keys) ====
-  async function goShopifyUpgrade(plan: PlanKey) {
+  // ==== Shopify Billing actions (supports 4 plan keys) ====
+  async function goShopifyUpgrade(plan) {
     try {
       setBillingBusy(true);
-      const safePlan: PlanKey = (allowedPlans.includes(plan)
-        ? plan
-        : "starter") as PlanKey;
+      const safePlan = allowedPlans.includes(plan) ? plan : "starter";
 
       const res = await fetch(
         `/api/shopify/billing/upgrade?host=${host || ""}`,
@@ -211,9 +205,7 @@ export default function SettingsPage() {
       {error && (
         <div className="mb-6 rounded border border-red-700 bg-red-900/30 p-4">
           <p className="text-red-200 font-semibold">Could not load settings</p>
-          <p className="text-xs text-red-200/80 mt-2">
-            {String(error.message)}
-          </p>
+          <p className="text-xs text-red-200/80 mt-2">{String(error.message)}</p>
         </div>
       )}
 
@@ -444,9 +436,7 @@ export default function SettingsPage() {
             <option value="CAD">CAD</option>
             <option value="NZD">NZD</option>
           </select>
-          {currencySaving && (
-            <span className="text-xs text-gray-400">Saving…</span>
-          )}
+          {currencySaving && <span className="text-xs text-gray-400">Saving…</span>}
         </div>
         <p className="text-xs text-gray-500 mt-3">
           Affects how amounts are displayed (e.g., at-risk revenue).
