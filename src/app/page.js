@@ -134,6 +134,10 @@ export default function Home() {
     }
   }
 
+  // Build partners href (preserve host when embedded)
+  const partnersHref =
+    isEmbedded && host ? `/partners?host=${encodeURIComponent(host)}` : "/partners";
+
   return (
     <main className="px-6">
       {/* Hero */}
@@ -145,7 +149,7 @@ export default function Home() {
           Ghost inventory is killing your revenue and reputation. Our tool
           detects and predicts stock errors before they cost you money.
         </p>
-        <div className="flex justify-center gap-4">
+        <div className="flex flex-wrap justify-center gap-4">
           <a
             href="#demo"
             className="bg-green-500 hover:bg-green-600 px-6 py-3 rounded text-black font-semibold"
@@ -168,6 +172,14 @@ export default function Home() {
             className="border border-green-500 text-green-400 px-6 py-3 rounded hover:bg-gray-800"
           >
             Read the Blog
+          </a>
+
+          {/* ✅ NEW: Agency Partners CTA (Option 1) */}
+          <a
+            href={partnersHref}
+            className="border border-purple-500 text-purple-300 px-6 py-3 rounded hover:bg-gray-800"
+          >
+            Agency Partners
           </a>
         </div>
 
@@ -334,7 +346,7 @@ export default function Home() {
               target="_blank"
               rel="noopener noreferrer"
               onClick={(e) => openExternal(PRIVACY_URL, e)}
-              className="hover:text-gray-2 00 underline-offset-4 hover:underline"
+              className="hover:text-gray-200 underline-offset-4 hover:underline"
             >
               Privacy
             </a>

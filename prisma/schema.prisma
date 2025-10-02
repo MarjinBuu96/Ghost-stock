@@ -179,3 +179,25 @@ model Kpi {
   value     Float
   createdAt DateTime @default(now())
 }
+
+model PartnerApplication {
+  id        String   @id @default(cuid())
+  name      String
+  email     String
+  agency    String?
+  website   String?
+  verticals String?
+  volume    String?
+  notes     String?
+
+  // handy for reporting/attribution
+  utmSource   String?
+  utmMedium   String?
+  utmCampaign String?
+
+  status    String   @default("new") // new | approved | rejected
+  createdAt DateTime @default(now())
+
+  @@index([email, createdAt])
+  @@index([status, createdAt])
+}
