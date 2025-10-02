@@ -1,6 +1,7 @@
+// src/app/page.js
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import createApp from "@shopify/app-bridge";
 import { Redirect } from "@shopify/app-bridge/actions";
 
@@ -8,9 +9,11 @@ import StockDashboardMock from "@/components/StockDashboardMock";
 import BlogHeader from "@/components/BlogHeader";
 
 const BLOG_URL = "https://blog.ghost-stock.co.uk";
+const ALLOWED_PLANS = ["starter", "starter_annual", "pro", "pro_annual"];
 
 export default function Home() {
   const appRef = useRef(null);
+  const [host, setHost] = useState(null);
   const isEmbedded =
     typeof window !== "undefined" && window.top !== window.self;
 
@@ -18,17 +21,21 @@ export default function Home() {
   useEffect(() => {
     if (!isEmbedded) return;
     const params = new URLSearchParams(window.location.search);
-    const host =
+    const hostParam =
       params.get("host") ||
       document.cookie.match(/(?:^|;\s*)shopifyHost=([^;]+)/)?.[1] ||
       null;
-    if (!host) return;
+    if (!hostParam) return;
+
+    // Remember & persist host for billing calls
+    setHost(hostParam);
+    document.cookie = `shopifyHost=${hostParam}; path=/; SameSite=None; Secure`;
 
     let app = window.__SHOPIFY_APP__;
     if (!app) {
       app = createApp({
         apiKey: process.env.NEXT_PUBLIC_SHOPIFY_API_KEY,
-        host,
+        host: hostParam,
         forceRedirect: true,
       });
       window.__SHOPIFY_APP__ = app;
@@ -48,6 +55,33 @@ export default function Home() {
     const redirect = Redirect.create(app);
     // REMOTE = full external URL (outside Admin)
     redirect.dispatch(Redirect.Action.REMOTE, BLOG_URL);
+  }
+
+  // Start Shopify billing for a given plan
+  async function startUpgrade(plan) {
+    try {
+      if (!isEmbedded) {
+        // Not in Admin: send to demo/request flow (or change to /settings)
+        window.location.hash = "#demo";
+        return;
+      }
+      const safePlan = ALLOWED_PLANS.includes(plan) ? plan : "starter";
+
+      const res = await fetch(`/api/shopify/billing/upgrade?host=${host || ""}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ plan: safePlan }),
+      });
+
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json?.confirmationUrl) throw new Error(json?.error || "Upgrade failed");
+
+      // Open Shopify approval outside the iframe
+      window.open(json.confirmationUrl, "_blank", "noopener,noreferrer");
+    } catch (err) {
+      console.error("Upgrade failed:", err);
+      alert("Could not start Shopify upgrade. Please try from the Settings page.");
+    }
   }
 
   return (
@@ -133,7 +167,8 @@ export default function Home() {
               First 20 installs: <span className="font-semibold">£9.99/mo</span> — grandfathered while installed
             </p>
             <a
-              href="#demo"
+              href="#"
+              onClick={(e) => { e.preventDefault(); startUpgrade("starter"); }}
               className="bg-green-500 hover:bg-green-600 px-4 py-2 rounded text-black font-semibold inline-block"
             >
               Get Started
@@ -149,7 +184,8 @@ export default function Home() {
               Multi-location tracking, ghost stock prediction, auto daily scans & more
             </p>
             <a
-              href="#demo"
+              href="#"
+              onClick={(e) => { e.preventDefault(); startUpgrade("pro"); }}
               className="bg-green-500 hover:bg-green-600 px-4 py-2 rounded text-black font-semibold inline-block"
             >
               Start Pro
@@ -164,13 +200,24 @@ export default function Home() {
               <p className="text-green-400 text-lg font-semibold">Pro: £290/yr</p>
             </div>
             <p className="text-xs text-gray-400 mb-6">Billed annually (equivalent to 10 months)</p>
-            <a
-              href="#demo"
-              className="border border-gray-400 hover:bg-gray-800 px-4 py-2 rounded font-semibold inline-block"
-              title="Ask for Annual billing in your demo"
-            >
-              Ask About Annual
-            </a>
+            <div className="flex items-center justify-center gap-3">
+              <a
+                href="#"
+                onClick={(e) => { e.preventDefault(); startUpgrade("starter_annual"); }}
+                className="border border-gray-400 hover:bg-gray-800 px-3 py-2 rounded font-semibold inline-block"
+                title="2 months free"
+              >
+                Starter Annual
+              </a>
+              <a
+                href="#"
+                onClick={(e) => { e.preventDefault(); startUpgrade("pro_annual"); }}
+                className="border border-gray-400 hover:bg-gray-800 px-3 py-2 rounded font-semibold inline-block"
+                title="2 months free"
+              >
+                Pro Annual
+              </a>
+            </div>
           </div>
         </div>
       </section>
@@ -190,7 +237,7 @@ export default function Home() {
             className="w-full px-4 py-2 rounded text-black"
             required
           />
-          <button className="bg-green-500 hover:bg-green-600 px-6 py-3 rounded text-black font-semibold w-full">
+        <button className="bg-green-500 hover:bg-green-600 px-6 py-3 rounded text-black font-semibold w-full">
             Request Demo
           </button>
         </form>
