@@ -50,27 +50,27 @@ const num = (v, d) => {
  * Determine if this store qualifies for the "first N installs" grandfather price.
  * Priority:
  *  1) Respect explicit boolean flags on the record if they exist (store.grandfathered).
- *  2) Otherwise, compute rank by createdAt among stores that have installed (accessToken present),
- *     and persist the computed result for future calls (best effort).
+ *  2) Otherwise, compute rank by createdAt among stores considered "installed".
+ *
+ * NOTE: accessToken is a required String in your schema, so Prisma rejects `{ not: null }`.
+ * We treat "installed" as accessToken !== "" when available.
  */
 async function isGrandfathered(store) {
-  // (1) Explicit flag support
   if (typeof store?.grandfathered === "boolean") return store.grandfathered;
 
-  // (2) Fallback rank
   const limit = num(process.env.STARTER_GRANDFATHER_LIMIT, 20);
   if (!store?.createdAt) return false;
 
-  const earlierOrEqual = await prisma.store.count({
-    where: {
-      accessToken: { not: null },
-      createdAt: { lte: store.createdAt },
-    },
-  });
+  const where = { createdAt: { lte: store.createdAt } };
+  // guard: only add a non-empty check if field exists and is string
+  if (typeof store?.accessToken === "string") {
+    where.accessToken = { not: "" };
+  }
 
+  const earlierOrEqual = await prisma.store.count({ where });
   const eligible = earlierOrEqual <= limit;
 
-  // Persist for future requests (best-effort)
+  // Best-effort persist so we won't recompute next time
   try {
     await prisma.store.update({
       where: { shop: store.shop },
@@ -188,10 +188,15 @@ export async function POST(req) {
 
     // Current subs
     const activeSubs = await getActiveSubscriptions(shop, store.accessToken);
-    const active = activeSubs?.find((s) => String(s.status).toUpperCase() === "ACTIVE") || null;
+    const active =
+      activeSubs?.find((s) => String(s.status).toUpperCase() === "ACTIVE") || null;
 
     // If already on EXACT same plan name, bounce (lets Monthly <-> Annual switch proceed)
-    if (active && active.name && active.name.toLowerCase() === String(pricing.name).toLowerCase()) {
+    if (
+      active &&
+      active.name &&
+      active.name.toLowerCase() === String(pricing.name).toLowerCase()
+    ) {
       console.log("ℹ️ Subscription already active for target plan:", active.name);
       return NextResponse.json({ confirmationUrl: returnUrl });
     }
@@ -219,7 +224,8 @@ export async function POST(req) {
     }
 
     // Create new subscription
-    const testFlag = String(process.env.SHOPIFY_BILLING_TEST || "").toLowerCase() === "true";
+    const testFlag =
+      String(process.env.SHOPIFY_BILLING_TEST || "").toLowerCase() === "true";
     const createMutation = `
       mutation appSubscriptionCreate(
         $name: String!
@@ -259,22 +265,39 @@ export async function POST(req) {
     };
 
     console.log("📤 Create sub →", JSON.stringify(variables, null, 2));
-    const { ok, status, json } = await shopifyGraphQL(shop, store.accessToken, createMutation, variables);
+    const { ok, status, json } = await shopifyGraphQL(
+      shop,
+      store.accessToken,
+      createMutation,
+      variables
+    );
     console.log("📦 Create sub resp:", status, JSON.stringify(json));
     if (!ok) {
-      return NextResponse.json({ error: "shopify_graphql_http", status, payload: json }, { status: 502 });
+      return NextResponse.json(
+        { error: "shopify_graphql_http", status, payload: json },
+        { status: 502 }
+      );
     }
     const result = json?.data?.appSubscriptionCreate;
     if (!result) {
-      return NextResponse.json({ error: "missing_subscription_create", payload: json }, { status: 502 });
+      return NextResponse.json(
+        { error: "missing_subscription_create", payload: json },
+        { status: 502 }
+      );
     }
     if (result.userErrors?.length) {
-      return NextResponse.json({ error: "shopify_user_errors", userErrors: result.userErrors }, { status: 400 });
+      return NextResponse.json(
+        { error: "shopify_user_errors", userErrors: result.userErrors },
+        { status: 400 }
+      );
     }
 
     const confirmationUrl = result.confirmationUrl;
     if (!confirmationUrl) {
-      return NextResponse.json({ error: "no_confirmation_url", payload: json }, { status: 500 });
+      return NextResponse.json(
+        { error: "no_confirmation_url", payload: json },
+        { status: 500 }
+      );
     }
 
     // Persist user's intent (non-fatal if it fails)
@@ -282,22 +305,30 @@ export async function POST(req) {
       await prisma.userSettings.upsert({
         where: { userEmail: store.userEmail },
         update: { plan: String(plan).toLowerCase() },
-        create: { userEmail: store.userEmail, currency: "GBP", plan: String(plan).toLowerCase() },
+        create: {
+          userEmail: store.userEmail,
+          currency: "GBP",
+          plan: String(plan).toLowerCase(),
+        },
       });
-      // If we computed grandfathered (legacy), make sure it's written once
       if (typeof store?.grandfathered === "boolean") {
-        // already persisted or not; only update if changed
         if (store.grandfathered !== grandfathered) {
           await prisma.store.update({ where: { shop }, data: { grandfathered } });
         }
       }
     } catch (e) {
-      console.warn("userSettings/store upsert failed (non-fatal):", e?.message || e);
+      console.warn(
+        "userSettings/store upsert failed (non-fatal):",
+        e?.message || e
+      );
     }
 
     return NextResponse.json({ confirmationUrl });
   } catch (err) {
     console.error("🔥 billing/upgrade crash:", err);
-    return NextResponse.json({ error: "server_error", message: err?.message || String(err) }, { status: 500 });
+    return NextResponse.json(
+      { error: "server_error", message: err?.message || String(err) },
+      { status: 500 }
+    );
   }
 }
