@@ -1,3 +1,4 @@
+// src/app/dashboard.js 
 "use client";
 
 import useSWR from "swr";
@@ -5,7 +6,6 @@ import { fetcher } from "@/lib/fetcher";
 import createApp from "@shopify/app-bridge";
 import { getSessionToken as fetchSessionToken } from "@/utils/getSessionToken";
 import { useState, useMemo, useEffect, useRef, Suspense } from "react";
-import { Redirect } from "@shopify/app-bridge/actions";
 
 function Banner({ tone = "info", title, body, children }) {
   const styles =
@@ -33,10 +33,14 @@ function DashboardInner() {
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
 
   const appRef = useRef(null);
+  const [host, setHost] = useState(null);
+  const isEmbedded = typeof window !== "undefined" && window.top !== window.self;
+
   const [filter, setFilter] = useState("all");
   const [isScanning, setIsScanning] = useState(false);
   const [countingIds, setCountingIds] = useState(() => new Set());
   const [hasScanned, setHasScanned] = useState(false);
+  const [billingBusy, setBillingBusy] = useState(false);
 
   // App Bridge init + tokenized fetch
   useEffect(() => {
@@ -45,14 +49,20 @@ function DashboardInner() {
     const params = new URLSearchParams(window.location.search);
     const urlHost = params.get("host");
     const cookieHost = document.cookie.match(/(?:^|;\s*)shopifyHost=([^;]+)/)?.[1] || null;
-    const host = urlHost || cookieHost;
-    if (!host) return;
+    const h = urlHost || cookieHost || null;
+    if (!h) return;
+
+    // Persist host for future navigations
+    if (urlHost) {
+      document.cookie = `shopifyHost=${urlHost}; path=/; SameSite=None; Secure`;
+    }
+    setHost(h);
 
     let app = window.__SHOPIFY_APP__;
     if (!app) {
       app = createApp({
         apiKey: "5860dca7a3c5d0818a384115d221179a",
-        host,
+        host: h,
         forceRedirect: true,
       });
       window.__SHOPIFY_APP__ = app;
@@ -79,7 +89,7 @@ function DashboardInner() {
           const headers = new Headers(init.headers || {});
           headers.set("Authorization", `Bearer ${token}`);
 
-          // also forward shop domain (defensive)
+          // forward shop domain if present (defensive)
           const cookieShop = document.cookie.match(/(?:^|;\s*)shopify_shop=([^;]+)/)?.[1] || "";
           if (cookieShop) headers.set("X-Shopify-Shop-Domain", cookieShop);
 
@@ -267,27 +277,40 @@ function DashboardInner() {
     await Promise.all([mutateSettings(), mutateKpis()]);
   }
 
+  // ✅ Robust billing start that works in embedded Admin
   async function upgradeTo(planName) {
     try {
-      const res = await fetch("/api/shopify/billing/upgrade", {
+      setBillingBusy(true);
+
+      // If not embedded (no host), send to Settings where the flow is available
+      if (!isEmbedded || !host) {
+        window.location.href = "/settings#billing";
+        return;
+      }
+
+      const allowed = ["starter", "starter_annual", "pro", "pro_annual"];
+      const safePlan = allowed.includes(planName) ? planName : "pro";
+
+      const res = await fetch(`/api/shopify/billing/upgrade?host=${encodeURIComponent(host)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ plan: planName }),
+        body: JSON.stringify({ plan: safePlan }),
       });
+
       const json = await res.json().catch(() => ({}));
-      if (!res.ok || !json?.confirmationUrl) throw new Error(json?.error || "Upgrade failed");
+      if (!res.ok || !json?.confirmationUrl) {
+        throw new Error(json?.error || "Upgrade failed");
+      }
 
-      const app = appRef.current;
-      if (!app) throw new Error("App Bridge not initialized");
+      // Open Shopify billing approval outside the iframe (most reliable)
+      window.open(json.confirmationUrl, "_blank", "noopener,noreferrer");
 
-      const redirect = Redirect.create(app);
-      redirect.dispatch(
-        Redirect.Action.ADMIN_PATH,
-        json.confirmationUrl.replace("https://admin.shopify.com", "")
-      );
+      setShowUpgradeModal(false);
     } catch (e) {
       console.warn(e);
       alert("Could not open the Shopify upgrade page.");
+    } finally {
+      setBillingBusy(false);
     }
   }
 
@@ -417,9 +440,10 @@ function DashboardInner() {
         >
           <button
             onClick={() => upgradeTo("pro")}
-            className="px-3 py-2 rounded bg-purple-500 hover:bg-purple-600 text-black text-sm font-semibold"
+            disabled={billingBusy}
+            className="px-3 py-2 rounded bg-purple-500 hover:bg-purple-600 text-black text-sm font-semibold disabled:opacity-60"
           >
-            Upgrade to Pro
+            {billingBusy ? "Starting…" : "Upgrade to Pro"}
           </button>
           <a
             href="/settings#billing"
@@ -430,7 +454,7 @@ function DashboardInner() {
         </Banner>
       )}
 
-      {showEmptyStateTips && (
+      {hasStore && showEmptyStateTips && (
         <Banner
           tone="info"
           title="No active alerts right now 🎉"
@@ -444,9 +468,10 @@ function DashboardInner() {
           </a>
           <button
             onClick={() => upgradeTo("pro")}
-            className="px-3 py-2 rounded bg-purple-500 hover:bg-purple-600 text-black text-sm font-semibold"
+            disabled={billingBusy}
+            className="px-3 py-2 rounded bg-purple-500 hover:bg-purple-600 text-black text-sm font-semibold disabled:opacity-60"
           >
-            Schedule Auto-Scans
+            {billingBusy ? "Starting…" : "Schedule Auto-Scans"}
           </button>
         </Banner>
       )}
@@ -797,6 +822,7 @@ function DashboardInner() {
         </p>
       </div>
 
+      {/* Upgrade Modal */}
       {showUpgradeModal && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
           <div className="bg-gray-900 border border-gray-700 rounded-lg p-6 max-w-md w-full">
@@ -813,9 +839,10 @@ function DashboardInner() {
               </button>
               <button
                 onClick={() => upgradeTo("pro")}
-                className="px-3 py-2 rounded bg-purple-500 hover:bg-purple-600 text-black text-sm font-semibold"
+                disabled={billingBusy}
+                className="px-3 py-2 rounded bg-purple-500 hover:bg-purple-600 text-black text-sm font-semibold disabled:opacity-60"
               >
-                Upgrade to Pro
+                {billingBusy ? "Starting…" : "Upgrade to Pro"}
               </button>
             </div>
           </div>
