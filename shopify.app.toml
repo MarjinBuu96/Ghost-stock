@@ -6,7 +6,7 @@ application_url = "https://ghost-stock.co.uk"
 embedded = true
 
 [webhooks]
-api_version = "2025-04"
+api_version = "2025-07"
 
   [[webhooks.subscriptions]]
   uri = "/api/shopify/webhooks"
