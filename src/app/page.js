@@ -9,6 +9,7 @@ import StockDashboardMock from "@/components/StockDashboardMock";
 import BlogHeader from "@/components/BlogHeader";
 
 const BLOG_URL = "https://blog.ghost-stock.co.uk";
+const SUBSCRIBE_URL = `${BLOG_URL}/#/portal/signup`;
 const TERMS_URL = "https://ghost-stock.co.uk/terms";
 const PRIVACY_URL = "https://ghost-stock.co.uk/privacy";
 const ALLOWED_PLANS = ["starter", "starter_annual", "pro", "pro_annual"];
@@ -174,7 +175,7 @@ export default function Home() {
             Read the Blog
           </a>
 
-          {/* ✅ NEW: Agency Partners CTA (Option 1) */}
+          {/* Agency Partners CTA */}
           <a
             href={partnersHref}
             className="border border-purple-500 text-purple-300 px-6 py-3 rounded hover:bg-gray-800"
@@ -189,7 +190,12 @@ export default function Home() {
 
       {/* Blog header (latest posts teaser) */}
       <section className="py-10 max-w-5xl mx-auto">
-        <BlogHeader />
+        <BlogHeader
+          readHref={BLOG_URL}
+          subscribeHref={SUBSCRIBE_URL}
+          onRead={onBlogClick}
+          onSubscribe={(e) => openExternal(SUBSCRIBE_URL, e)}
+        />
       </section>
 
       {/* How it works */}

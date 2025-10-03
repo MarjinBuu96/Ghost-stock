@@ -131,7 +131,7 @@ function planToPricing(planKey, { grandfathered } = {}) {
 }
 
 async function shopifyGraphQL(shop, accessToken, query, variables) {
-  const resp = await fetch(`https://${shop}/admin/api/${API_VERSION}/graphql.json`, {
+  const resp = await fetch(shopifyGraphqlUrl(shop), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

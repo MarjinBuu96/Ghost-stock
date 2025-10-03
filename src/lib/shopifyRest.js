@@ -1,8 +1,8 @@
-// src/lib/shopifyRest.js
+﻿// src/lib/shopifyRest.js
 import { getInventoryByVariantGQL } from "@/lib/shopifyGraphql";
 
 // Centralize Admin API version here as well (orders REST still used)
-const API_VERSION = "2025-07";
+
 
 /* --------------------------------- helpers -------------------------------- */
 
@@ -30,11 +30,11 @@ async function fetchWithRetry(url, opts = {}, tries = 5) {
 }
 
 function normalizePathOrUrl(shop, pathOrUrl) {
-  if (/^https?:\/\//i.test(pathOrUrl)) {
-    const u = new URL(pathOrUrl);
-    return u.toString();
+  // If it's already a full URL (e.g., pageUrl from Link header), keep as-is
+  if (/^https?:\/\//i.test(String(pathOrUrl))) {
+    return String(pathOrUrl);
   }
-  return `https://${shop}/admin/api/${API_VERSION}/${String(pathOrUrl).replace(/^\/+/, "")}`;
+  
 }
 
 function buildUrl(shop, path, search = {}) {
