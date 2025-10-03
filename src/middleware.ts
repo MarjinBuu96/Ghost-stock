@@ -1,23 +1,20 @@
+// src/middleware.ts
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 export const config = {
-  // Match all paths except API and Next.js internals
-  matcher: ["/((?!api|_next|favicon\\.ico).*)"],
+  // Match all pages except API and Next.js internals & static files
+  matcher: ["/((?!api|_next|.*\\.(?:png|jpg|jpeg|gif|svg|webp|ico|txt|css|js|map)).*)"],
 };
 
-const PROTECTED_PATHS = ["/dashboard", "/settings"]; // add more if needed
+// Only these routes must be opened inside the Shopify Admin iframe
+const EMBED_ONLY_PATHS = ["/dashboard"];
 
 export function middleware(req: NextRequest) {
   const url = req.nextUrl;
   const res = NextResponse.next();
 
-  // ---------- Skip static assets ----------
-  if (url.pathname.match(/\.(png|jpg|jpeg|gif|svg|webp|ico|txt)$/)) {
-    return res;
-  }
-
-  // ---------- Security headers (embedded app) ----------
+  // ---------- Security headers (safe to send always) ----------
   const csp = [
     "default-src 'self' https: data: blob:",
     "script-src 'self' 'unsafe-inline' 'unsafe-eval' https: blob:",
@@ -30,14 +27,14 @@ export function middleware(req: NextRequest) {
   res.headers.set("Content-Security-Policy", csp);
   res.headers.delete("X-Frame-Options");
 
-  // ---------- Read host/shop from request ----------
+  // ---------- Read existing values ----------
   const qHost = url.searchParams.get("host") || "";
   const referrer = req.headers.get("referer") || "";
   const hdrShop = req.headers.get("x-shopify-shop-domain") || "";
   const cookieHost = req.cookies.get("shopifyHost")?.value || "";
   const cookieShop = req.cookies.get("shopify_shop")?.value || "";
 
-  // ---------- Persist cookies ----------
+  // ---------- Persist cookies (no redirects) ----------
   const cookieInit = {
     path: "/",
     httpOnly: false,
@@ -49,38 +46,22 @@ export function middleware(req: NextRequest) {
   if (qHost && qHost !== cookieHost) {
     res.cookies.set("shopifyHost", qHost, cookieInit);
   }
-  if (hdrShop && hdrShop !== cookieShop) {
+  if (hdrShop && hdrShop.toLowerCase() !== cookieShop) {
     res.cookies.set("shopify_shop", hdrShop.toLowerCase(), cookieInit);
   }
 
-  // ---------- Preserve `host` ----------
-  if (!qHost) {
-    const refHost = (() => {
-      try {
-        const r = new URL(referrer);
-        return r.searchParams.get("host") || "";
-      } catch {
-        return "";
-      }
-    })();
+  // ---------- Do NOT redirect to inject `host` ----------
+  // (standalone pages should load without a host param)
 
-    const fallbackHost = refHost || cookieHost;
-    if (fallbackHost) {
-      const redirectUrl = url.clone();
-      redirectUrl.searchParams.set("host", fallbackHost);
-      return NextResponse.redirect(redirectUrl);
-    }
-  }
-
-  // ---------- Block protected pages ----------
-  const isProtected = PROTECTED_PATHS.some((p) => url.pathname.startsWith(p));
+  // ---------- Gate only embed-only routes ----------
+  const isEmbedOnly = EMBED_ONLY_PATHS.some((p) => url.pathname.startsWith(p));
   const looksEmbedded =
     !!qHost ||
-    referrer.includes("admin.shopify.com") ||
-    referrer.includes(".myshopify.com") ||
+    /admin\.shopify\.com/.test(referrer) ||
+    /\.myshopify\.com/.test(referrer) ||
     !!cookieHost;
 
-  if (isProtected && !looksEmbedded) {
+  if (isEmbedOnly && !looksEmbedded) {
     return new NextResponse(
       `<!doctype html>
 <html><head><meta charset="utf-8"><title>Ghost Stock</title></head>
@@ -93,13 +74,7 @@ export function middleware(req: NextRequest) {
     </p>
   </div>
 </body></html>`,
-      {
-        status: 403,
-        headers: {
-          "Content-Type": "text/html; charset=utf-8",
-          "Cache-Control": "no-store",
-        },
-      }
+      { status: 403, headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } }
     );
   }
 

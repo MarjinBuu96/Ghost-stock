@@ -1,7 +1,10 @@
 // src/lib/shopifyGraphql.js
-import { shopifyGraphqlUrl } from "@/lib/shopifyApi";
+const SHOPIFY_API_VERSION = process.env.SHOPIFY_API_VERSION || "2025-07";
 
-/** Minimal GraphQL POST helper */
+function shopifyGraphqlUrl(shop) {
+  return `https://${shop}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`;
+}
+
 async function gql(shop, accessToken, query, variables = {}) {
   const resp = await fetch(shopifyGraphqlUrl(shop), {
     method: "POST",
@@ -11,7 +14,6 @@ async function gql(shop, accessToken, query, variables = {}) {
     },
     body: JSON.stringify({ query, variables }),
   });
-
   const json = await resp.json().catch(() => ({}));
   if (!resp.ok || json.errors) {
     const err = (json.errors && JSON.stringify(json.errors)) || JSON.stringify(json);
@@ -20,12 +22,6 @@ async function gql(shop, accessToken, query, variables = {}) {
   return json.data;
 }
 
-/**
- * Fetch all variants via GraphQL.
- * Returns: [{ variantId, sku, product, systemQty, price, inventory_item_id, levels?[] }]
- * - When multiLocation=false: uses variant.inventoryQuantity.
- * - When multiLocation=true: sums InventoryLevel.availableQuantity across locations.
- */
 export async function getInventoryByVariantGQL(
   shop,
   accessToken,
@@ -41,7 +37,6 @@ export async function getInventoryByVariantGQL(
             id
             sku
             title
-            price
             product { title }
             inventoryQuantity
             inventoryItem {
@@ -49,8 +44,11 @@ export async function getInventoryByVariantGQL(
               ${multiLocation ? `
               inventoryLevels(first: 50) {
                 nodes {
-                  availableQuantity
                   location { id name }
+                  quantities(names: ["available"]) {
+                    name
+                    quantity
+                  }
                 }
               }` : ``}
             }
@@ -70,22 +68,23 @@ export async function getInventoryByVariantGQL(
     const edges = conn?.edges || [];
 
     for (const { node: v } of edges) {
-      // Build per-location levels (if requested)
-      const levels = multiLocation
-        ? (v.inventoryItem?.inventoryLevels?.nodes || []).map((l) => ({
-            locationId: l.location?.id || null,
-            locationName: l.location?.name || "",
-            // normalize to .available for the rest of the app
-            available: Number(l?.availableQuantity ?? 0),
-          }))
-        : null;
+      let levels = null;
+      if (multiLocation) {
+        const raw = v.inventoryItem?.inventoryLevels?.nodes || [];
+        levels = raw.map((n) => {
+          const avail = Array.isArray(n.quantities)
+            ? Number(n.quantities.find((q) => q?.name === "available")?.quantity ?? 0)
+            : 0;
+          return {
+            locationId: n.location?.id || null,
+            locationName: n.location?.name || "",
+            available: avail,
+          };
+        });
+      }
 
-      // If multi-location requested but nothing came back (e.g. scope/locations),
-      // fall back to variant.inventoryQuantity so snapshot still shows numbers.
       const systemQty = multiLocation
-        ? ((levels || []).length
-            ? (levels || []).reduce((sum, l) => sum + (l.available || 0), 0)
-            : Number(v.inventoryQuantity ?? 0))
+        ? (levels || []).reduce((sum, l) => sum + (l.available || 0), 0)
         : Number(v.inventoryQuantity ?? 0);
 
       items.push({
@@ -93,7 +92,6 @@ export async function getInventoryByVariantGQL(
         sku: v.sku || "",
         product: v.product?.title || v.title || "",
         systemQty,
-        price: Number(v.price ?? 0),
         inventory_item_id: v.inventoryItem?.id || null,
         ...(multiLocation ? { levels } : {}),
       });

@@ -18,15 +18,13 @@ export default function RootLayout({ children }) {
           name="shopify-api-key"
           content={process.env.NEXT_PUBLIC_SHOPIFY_API_KEY || "5860dca7a3c5d0818a384115d221179a"}
         />
-
-        {/* Load App Bridge but only initialize it when embedded */}
         <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
         <script
           dangerouslySetInnerHTML={{
             __html: `
 (function () {
   try {
-    // If we're NOT inside an iframe, skip App Bridge init entirely.
+    // Only run inside Shopify Admin iframe
     if (window.top === window.self) return;
 
     var qs = new URLSearchParams(window.location.search);
@@ -35,12 +33,9 @@ export default function RootLayout({ children }) {
     var cookieHost = cookieHostMatch ? cookieHostMatch[1] : null;
     var host = urlHost || cookieHost || null;
 
-    // Persist host if it came from the URL (keeps deep-links working)
     if (urlHost) {
       document.cookie = 'shopifyHost=' + urlHost + '; path=/; SameSite=None; Secure';
     }
-
-    // No host? Don't init, and crucially, don't force-redirect.
     if (!host) return;
 
     var AB = window['app-bridge'] || window.appBridge || null;
@@ -50,8 +45,8 @@ export default function RootLayout({ children }) {
       window.__SHOPIFY_APP__ = AB.createApp({
         apiKey: '${process.env.NEXT_PUBLIC_SHOPIFY_API_KEY || "5860dca7a3c5d0818a384115d221179a"}',
         host: host,
-        // Safe to keep true here because this block only runs when embedded.
-        forceRedirect: true
+        // IMPORTANT: do not force-redirect; prevents bouncing on standalone pages
+        forceRedirect: false
       });
     }
   } catch (e) {
@@ -64,14 +59,7 @@ export default function RootLayout({ children }) {
       </head>
       <body className="gs-page">
         <noscript>
-          <div
-            style={{
-              background: "#111",
-              color: "#fff",
-              padding: "8px 12px",
-              textAlign: "center",
-            }}
-          >
+          <div style={{ background: "#111", color: "#fff", padding: "8px 12px", textAlign: "center" }}>
             This app works best with JavaScript enabled.
           </div>
         </noscript>
