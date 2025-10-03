@@ -1,7 +1,7 @@
 // src/lib/shopifyGraphql.js
 import { shopifyGraphqlUrl } from "@/lib/shopifyApi";
 
-/** Low-level GraphQL POST */
+/** Minimal GraphQL POST helper */
 async function gql(shop, accessToken, query, variables = {}) {
   const resp = await fetch(shopifyGraphqlUrl(shop), {
     method: "POST",
@@ -24,7 +24,7 @@ async function gql(shop, accessToken, query, variables = {}) {
  * Fetch all variants via GraphQL.
  * Returns: [{ variantId, sku, product, systemQty, price, inventory_item_id, levels?[] }]
  * - When multiLocation=false: uses variant.inventoryQuantity.
- * - When multiLocation=true: sums inventoryLevels.available across locations.
+ * - When multiLocation=true: sums InventoryLevel.availableQuantity across locations.
  */
 export async function getInventoryByVariantGQL(
   shop,
@@ -49,7 +49,7 @@ export async function getInventoryByVariantGQL(
               ${multiLocation ? `
               inventoryLevels(first: 50) {
                 nodes {
-                  available
+                  availableQuantity
                   location { id name }
                 }
               }` : ``}
@@ -70,24 +70,30 @@ export async function getInventoryByVariantGQL(
     const edges = conn?.edges || [];
 
     for (const { node: v } of edges) {
+      // Build per-location levels (if requested)
       const levels = multiLocation
         ? (v.inventoryItem?.inventoryLevels?.nodes || []).map((l) => ({
             locationId: l.location?.id || null,
             locationName: l.location?.name || "",
-            available: Number(l.available ?? 0),
+            // normalize to .available for the rest of the app
+            available: Number(l?.availableQuantity ?? 0),
           }))
         : null;
 
+      // If multi-location requested but nothing came back (e.g. scope/locations),
+      // fall back to variant.inventoryQuantity so snapshot still shows numbers.
       const systemQty = multiLocation
-        ? (levels || []).reduce((sum, l) => sum + (l.available || 0), 0)
-        : (typeof v.inventoryQuantity === "number" ? v.inventoryQuantity : Number(v.inventoryQuantity ?? 0));
+        ? ((levels || []).length
+            ? (levels || []).reduce((sum, l) => sum + (l.available || 0), 0)
+            : Number(v.inventoryQuantity ?? 0))
+        : Number(v.inventoryQuantity ?? 0);
 
       items.push({
         variantId: v.id,
         sku: v.sku || "",
         product: v.product?.title || v.title || "",
         systemQty,
-        price: Number(v.price ?? 0),           // ✅ expose price for At-Risk revenue
+        price: Number(v.price ?? 0),
         inventory_item_id: v.inventoryItem?.id || null,
         ...(multiLocation ? { levels } : {}),
       });
