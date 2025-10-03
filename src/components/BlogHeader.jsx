@@ -1,6 +1,10 @@
-import Link from "next/link";
-
-export default function BlogHeader() {
+// src/components/BlogHeader.jsx
+export default function BlogHeader({
+  readHref = "https://blog.ghost-stock.co.uk",
+  subscribeHref = "https://blog.ghost-stock.co.uk/#/portal/signup",
+  onRead,
+  onSubscribe,
+}) {
   return (
     <section className="relative overflow-hidden rounded-2xl border border-gray-800 bg-gradient-to-br from-gray-900 via-gray-900 to-gray-800 px-6 py-10 md:px-10 md:py-14">
       <div className="absolute -top-24 -right-24 h-64 w-64 rounded-full bg-emerald-500/10 blur-3xl" />
@@ -17,15 +21,23 @@ export default function BlogHeader() {
         </p>
 
         <div className="mt-6 flex flex-wrap gap-3">
-          <Link
-            href="/blog"
+          {/* Read the blog — external/open via App Bridge when embedded */}
+          <a
+            href={readHref}
+            onClick={onRead}
+            target="_blank"
+            rel="noopener noreferrer"
             className="inline-flex items-center justify-center rounded-lg bg-emerald-500 px-4 py-2 font-semibold text-black hover:bg-emerald-400"
           >
             Read the blog
-          </Link>
+          </a>
 
+          {/* Subscribe — external/open via App Bridge when embedded */}
           <a
-            href="/blog/#/portal/signup"
+            href={subscribeHref}
+            onClick={onSubscribe}
+            target="_blank"
+            rel="noopener noreferrer"
             className="inline-flex items-center justify-center rounded-lg border border-gray-700 bg-gray-900 px-4 py-2 font-semibold text-white hover:bg-gray-800"
           >
             Get new posts by email
@@ -38,4 +50,5 @@ export default function BlogHeader() {
       </div>
     </section>
   );
+}
 }
