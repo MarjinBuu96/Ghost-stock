@@ -1,13 +1,10 @@
 // src/app/dashboard.js
 "use client";
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
-export const fetchCache = "force-no-store";
-export const runtime = "nodejs";
 
 import useSWR from "swr";
 import { fetcher } from "@/lib/fetcher";
 import createApp from "@shopify/app-bridge";
+import { Redirect } from "@shopify/app-bridge/actions";
 import { getSessionToken as fetchSessionToken } from "@/utils/getSessionToken";
 import { useState, useMemo, useEffect, useRef, Suspense } from "react";
 
@@ -46,18 +43,21 @@ function DashboardInner() {
   const [hasScanned, setHasScanned] = useState(false);
   const [billingBusy, setBillingBusy] = useState(false);
 
-  // Helper to consistently get host (URL first, then cookie, then state)
+  // Safe host getter (SSR-safe)
   const getHost = () => {
+    if (typeof window === "undefined") return host || "";
     try {
-      const urlHost = new URLSearchParams(location.search).get("host");
+      const urlHost = new URLSearchParams(window.location.search).get("host");
       if (urlHost) return urlHost;
     } catch {}
-    const cookieHost = document.cookie.match(/(?:^|;\s*)shopifyHost=([^;]+)/)?.[1] || "";
-    if (cookieHost) return cookieHost;
-    return host || "";
+    const cookieHost =
+      (typeof document !== "undefined" &&
+        document.cookie.match(/(?:^|;\s*)shopifyHost=([^;]+)/)?.[1]) ||
+      "";
+    return cookieHost || host || "";
   };
 
-  // Quick helpers to build settings links with host preserved
+  // Settings links (preserve host)
   const settingsHref = useMemo(() => {
     const h = getHost();
     return h ? `/settings?host=${encodeURIComponent(h)}` : "/settings";
@@ -83,7 +83,6 @@ function DashboardInner() {
     const h = urlHost || cookieHost || null;
     if (!h) return;
 
-    // Persist host for future navigations
     if (urlHost) {
       document.cookie = `shopifyHost=${urlHost}; path=/; SameSite=None; Secure`;
     }
@@ -92,7 +91,7 @@ function DashboardInner() {
     let app = window.__SHOPIFY_APP__;
     if (!app) {
       app = createApp({
-        apiKey: "5860dca7a3c5d0818a384115d221179a",
+        apiKey: process.env.NEXT_PUBLIC_SHOPIFY_API_KEY || "5860dca7a3c5d0818a384115d221179a",
         host: h,
         forceRedirect: true,
       });
@@ -100,7 +99,7 @@ function DashboardInner() {
     }
     appRef.current = app;
 
-    // Bootstrap session token once
+    // Session bootstrap
     fetchSessionToken(app)
       .then((token) =>
         fetch("/api/auth/session", {
@@ -110,7 +109,7 @@ function DashboardInner() {
       )
       .catch(() => {});
 
-    // Patch fetch with token for /api/* on same origin
+    // Patch fetch for /api/* with session token
     const originalFetch = window.fetch.bind(window);
     window.fetch = async (input, init = {}) => {
       try {
@@ -120,8 +119,8 @@ function DashboardInner() {
           const headers = new Headers(init.headers || {});
           headers.set("Authorization", `Bearer ${token}`);
 
-          // forward shop domain if present (defensive)
-          const cookieShop = document.cookie.match(/(?:^|;\s*)shopify_shop=([^;]+)/)?.[1] || "";
+          const cookieShop =
+            document.cookie.match(/(?:^|;\s*)shopify_shop=([^;]+)/)?.[1] || "";
           if (cookieShop) headers.set("X-Shopify-Shop-Domain", cookieShop);
 
           return originalFetch(input, { ...init, headers });
@@ -130,7 +129,6 @@ function DashboardInner() {
       return originalFetch(input, init);
     };
 
-    // cleanup
     return () => {
       window.fetch = originalFetch;
     };
@@ -169,7 +167,7 @@ function DashboardInner() {
   const invRows = invData?.items ?? [];
   const invCount = invData?.count ?? 0;
 
-  // KPIs — poll every 15s
+  // KPIs (poll)
   const {
     data: kpis,
     isLoading: kpisLoading,
@@ -285,13 +283,20 @@ function DashboardInner() {
         window.location.href = "/login?callbackUrl=/dashboard";
         return;
       }
+
       if (payload?.error === "no_store") {
         alert("No Shopify store connected yet. Head to Settings to connect your shop.");
-        // ❗ Preserve host to avoid middleware bounce
         const h = getHost();
-        window.location.href = h ? `/settings?host=${encodeURIComponent(h)}` : "/settings";
+        if (isEmbedded && app) {
+          const redirect = Redirect.create(app);
+          // Navigate inside Admin app context; your app router receives /settings
+          redirect.dispatch(Redirect.Action.ADMIN_PATH, `/apps/ghost-stock${h ? `?host=${encodeURIComponent(h)}` : ""}#/settings`);
+        } else {
+          window.location.href = h ? `/settings?host=${encodeURIComponent(h)}` : "/settings";
+        }
         return;
       }
+
       alert("Scan failed. Please try again.");
     } catch (e) {
       console.error(e);
@@ -310,7 +315,6 @@ function DashboardInner() {
     await Promise.all([mutateSettings(), mutateKpis()]);
   }
 
-  // Robust billing start; if not embedded, send to settings (with host if present)
   async function upgradeTo(planName) {
     try {
       setBillingBusy(true);
@@ -329,12 +333,10 @@ function DashboardInner() {
         body: JSON.stringify({ plan: safePlan }),
       });
 
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok || !json?.confirmationUrl) {
-        throw new Error(json?.error || "Upgrade failed");
-      }
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || !j?.confirmationUrl) throw new Error(j?.error || "Upgrade failed");
 
-      window.open(json.confirmationUrl, "_blank", "noopener,noreferrer");
+      window.open(j.confirmationUrl, "_blank", "noopener,noreferrer");
       setShowUpgradeModal(false);
     } catch (e) {
       console.warn(e);
@@ -365,7 +367,9 @@ function DashboardInner() {
         });
         if (!cancelled && res.ok) {
           setHasScanned(true);
-          try { localStorage.setItem("hasScanned", "1"); } catch {}
+          try {
+            localStorage.setItem("hasScanned", "1");
+          } catch {}
           await Promise.all([mutate(), invMutate(), mutateKpis()]);
         }
       } catch (e) {
@@ -381,7 +385,6 @@ function DashboardInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasStore]);
 
-  // Banners
   const showRunScanBanner = hasStore && !isScanning && !hasScanned;
   const showFinishAlertsSetup = hasStore && canUseIntegrations && (!slackConfigured || !emailConfigured);
   const showUpgradeProBanner = hasStore && isStarter && (liveCount > 0 || atRiskRevenue > 0);
@@ -882,7 +885,6 @@ function DashboardInner() {
   );
 }
 
-// DO NOT TOUCH New wrapper exporting default with Suspense (required by Next.js)
 export default function Dashboard() {
   return (
     <Suspense fallback={<div className="px-6 py-10 text-gray-400">Loading…</div>}>
