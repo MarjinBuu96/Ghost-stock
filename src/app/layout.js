@@ -18,29 +18,46 @@ export default function RootLayout({ children }) {
           name="shopify-api-key"
           content={process.env.NEXT_PUBLIC_SHOPIFY_API_KEY || "5860dca7a3c5d0818a384115d221179a"}
         />
+
+        {/* Load App Bridge but only initialize it when embedded */}
         <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
         <script
           dangerouslySetInnerHTML={{
             __html: `
-              (function () {
-                try {
-                  var qs = new URLSearchParams(window.location.search);
-                  var host = qs.get('host') || (document.cookie.match(/(?:^|;\\s*)shopifyHost=([^;]+)/) || [])[1] || '';
-                  if (!host) return;
-                  document.cookie = 'shopifyHost=' + host + '; path=/; SameSite=None; Secure';
-                  var AB = window['app-bridge'] || window.appBridge || null;
-                  if (!AB || !AB.createApp) return;
-                  if (!window.__SHOPIFY_APP__) {
-                    window.__SHOPIFY_APP__ = AB.createApp({
-                      apiKey: '${process.env.NEXT_PUBLIC_SHOPIFY_API_KEY || "5860dca7a3c5d0818a384115d221179a"}',
-                      host: host,
-                      forceRedirect: true
-                    });
-                  }
-                } catch (e) {
-                  console.warn('App Bridge init failed:', e);
-                }
-              })();
+(function () {
+  try {
+    // If we're NOT inside an iframe, skip App Bridge init entirely.
+    if (window.top === window.self) return;
+
+    var qs = new URLSearchParams(window.location.search);
+    var urlHost = qs.get('host');
+    var cookieHostMatch = document.cookie.match(/(?:^|;\\s*)shopifyHost=([^;]+)/);
+    var cookieHost = cookieHostMatch ? cookieHostMatch[1] : null;
+    var host = urlHost || cookieHost || null;
+
+    // Persist host if it came from the URL (keeps deep-links working)
+    if (urlHost) {
+      document.cookie = 'shopifyHost=' + urlHost + '; path=/; SameSite=None; Secure';
+    }
+
+    // No host? Don't init, and crucially, don't force-redirect.
+    if (!host) return;
+
+    var AB = window['app-bridge'] || window.appBridge || null;
+    if (!AB || !AB.createApp) return;
+
+    if (!window.__SHOPIFY_APP__) {
+      window.__SHOPIFY_APP__ = AB.createApp({
+        apiKey: '${process.env.NEXT_PUBLIC_SHOPIFY_API_KEY || "5860dca7a3c5d0818a384115d221179a"}',
+        host: host,
+        // Safe to keep true here because this block only runs when embedded.
+        forceRedirect: true
+      });
+    }
+  } catch (e) {
+    console.warn('App Bridge init failed:', e);
+  }
+})();
             `,
           }}
         />
