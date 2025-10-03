@@ -1,10 +1,8 @@
 ﻿// src/lib/shopifyRest.js
+import { shopifyRestUrl } from "@/lib/shopifyApi";
 import { getInventoryByVariantGQL } from "@/lib/shopifyGraphql";
 
-// Centralize Admin API version here as well (orders REST still used)
-
-
-/* --------------------------------- helpers -------------------------------- */
+/* ------------------------------ helpers ------------------------------ */
 
 async function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
@@ -30,11 +28,11 @@ async function fetchWithRetry(url, opts = {}, tries = 5) {
 }
 
 function normalizePathOrUrl(shop, pathOrUrl) {
-  // If it's already a full URL (e.g., pageUrl from Link header), keep as-is
-  if (/^https?:\/\//i.test(String(pathOrUrl))) {
-    return String(pathOrUrl);
-  }
-  
+  const s = String(pathOrUrl || "");
+  // If it's already a full URL (e.g., a Link header "next" URL), keep it.
+  if (/^https?:\/\//i.test(s)) return s;
+  // Otherwise build an absolute REST URL via our helper.
+  return shopifyRestUrl(shop, s.replace(/^\/+/, ""));
 }
 
 function buildUrl(shop, path, search = {}) {
@@ -51,20 +49,24 @@ function nextLinkFromHeaders(headers) {
   const m = link.match(/<([^>]+)>\s*;\s*rel="next"/i);
   if (!m) return null;
   try {
-    const u = new URL(m[1]);
-    return u.toString();
+    return new URL(m[1]).toString();
   } catch {
     return null;
   }
 }
 
-/* ----------------------------- low-level GET ------------------------------ */
+function toNumber(n, fallback = 0) {
+  if (n == null || n === "") return fallback;
+  const x = Number(n);
+  return Number.isFinite(x) ? x : fallback;
+}
+
+/* ----------------------------- low-level GET ----------------------------- */
 
 export async function shopifyGetRaw(shop, token, pathOrUrl, search = {}) {
   // 🚫 Belt-and-braces: block deprecated product/variant REST endpoints
   const asString = String(pathOrUrl || "");
-  const forbidden = /\/(products|variants)\.json(?:$|[?#])/i;
-  if (forbidden.test(asString)) {
+  if (/(^|\/)(products|variants)\.json(?:$|[?#])/i.test(asString)) {
     throw new Error("Blocked deprecated Shopify REST endpoint: " + asString);
   }
 
@@ -78,30 +80,46 @@ export async function shopifyGetRaw(shop, token, pathOrUrl, search = {}) {
 
   const text = await res.text().catch(() => "");
   let body = text;
-  try { body = text ? JSON.parse(text) : {}; } catch {}
+  try {
+    body = text ? JSON.parse(text) : {};
+  } catch {}
 
   return { ok: res.ok, status: res.status, body, headers: res.headers, text, url };
 }
 
-/* --------------------- inventory (now uses GraphQL) ----------------------- */
+/* -------------------- INVENTORY (GraphQL-backed) -------------------- */
 
-/**
- * getInventoryByVariant
- * Wrapper that uses GraphQL under the hood (no deprecated REST).
- * Returns: [{ sku, product, variantId, inventory_item_id, systemQty }]
+/** 
+ * Snapshot used by callers expecting a REST-like shape.
+ * Returns [{ sku, product, variantId, inventory_item_id, systemQty, (levels?) }]
  */
+export async function getInventorySnapshot(
+  shop,
+  accessToken,
+  { multiLocation = false } = {}
+) {
+  const items = await getInventoryByVariantGQL(shop, accessToken, { multiLocation });
+  return (items || []).map((it) => ({
+    sku: it.sku || "",
+    product: it.product || it.title || "",
+    variantId: it.variantId ?? it.id ?? null,
+    inventory_item_id:
+      it.inventory_item_id ??
+      (typeof it.inventoryItemId !== "undefined" ? it.inventoryItemId : null),
+    systemQty: Number(it.systemQty ?? 0),
+    ...(multiLocation && Array.isArray(it.levels) ? { levels: it.levels } : {}),
+  }));
+}
+
+// Friendly aliases kept for existing imports elsewhere
 export async function getInventoryByVariant(shop, accessToken) {
-  return getInventoryByVariantGQL(shop, accessToken, { multiLocation: false });
+  return getInventorySnapshot(shop, accessToken, { multiLocation: false });
 }
-
-/**
- * Multi-location aggregation via GraphQL inventoryLevels
- */
 export async function getInventoryByVariantMultiLocation(shop, accessToken) {
-  return getInventoryByVariantGQL(shop, accessToken, { multiLocation: true });
+  return getInventorySnapshot(shop, accessToken, { multiLocation: true });
 }
 
-/* ---------------- orders → sales velocity (REST is fine) ------------------ */
+/* --------------- ORDERS → sales velocity (REST; OK) --------------- */
 
 /**
  * Returns a map { skuOrVariantKey: quantitySold } for the last `daysBack` days.
@@ -132,7 +150,9 @@ export async function getSalesByVariant(shop, token, daysBack = 14) {
     }
 
     let body = {};
-    try { body = text ? JSON.parse(text) : {}; } catch {}
+    try {
+      body = text ? JSON.parse(text) : {};
+    } catch {}
 
     const orders = Array.isArray(body?.orders) ? body.orders : [];
     for (const o of orders) {
