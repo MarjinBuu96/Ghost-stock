@@ -5,8 +5,8 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { prisma } from "@/lib/prisma";
 
-import { getInventoryByVariantGQL } from "@/lib/shopifyGraphql";
-import { getSalesByVariant } from "@/lib/shopifyRest"; // orders still on REST (not in the deprecation notice)
+import { getInventoryByVariantGQL } from "@/lib/shopifyGraphql"; // ✅ GraphQL (2025-07)
+import { getSalesByVariant } from "@/lib/shopifyRest";           // REST orders only (ok)
 import { computeAlerts } from "@/lib/alertsEngine";
 import { sendAlertEmail } from "@/lib/email";
 
@@ -25,26 +25,21 @@ function mergeWithThresholdAlerts(baseAlerts, invItems, threshold) {
   if (!Number.isFinite(threshold) || threshold < 0) return baseAlerts;
 
   const bySku = new Map();
-  for (const a of baseAlerts) {
-    if (!bySku.has(a.sku)) bySku.set(a.sku, a);
-  }
+  for (const a of baseAlerts) if (!bySku.has(a.sku)) bySku.set(a.sku, a);
 
   for (const it of invItems) {
     const qty = Number(it.systemQty ?? 0);
-    if (qty <= threshold) {
-      if (!bySku.has(it.sku)) {
-        bySku.set(it.sku, {
-          sku: it.sku,
-          product: it.product || it.title || it.name || "",
-          systemQty: qty,
-          expectedMin: threshold + 1,
-          expectedMax: threshold + 1,
-          severity: "med",
-        });
-      }
+    if (qty <= threshold && !bySku.has(it.sku)) {
+      bySku.set(it.sku, {
+        sku: it.sku,
+        product: it.product || it.title || it.name || "",
+        systemQty: qty,
+        expectedMin: threshold + 1,
+        expectedMax: threshold + 1,
+        severity: "med",
+      });
     }
   }
-
   return Array.from(bySku.values());
 }
 
@@ -54,14 +49,8 @@ function normalizeLocId(id) {
   return s.includes("/Location/") ? s.split("/Location/").pop() : s;
 }
 
-/**
- * Main handler
- */
 export async function POST(req) {
-  // ─────────────────────────────────────────────────────────────────────────────
-  // 🔐 Internal/Cron mode (Authorization: Bearer <CRON_SECRET>)
-  // POST /api/scan?shop=<shop.myshopify.com>
-  // ─────────────────────────────────────────────────────────────────────────────
+  // ───────────────── Internal/Cron mode ─────────────────
   try {
     const auth = req.headers.get("authorization") || "";
     const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
@@ -82,14 +71,14 @@ export async function POST(req) {
         return NextResponse.json({ error: "db_lookup_failed" }, { status: 500 });
       }
 
-      if (!store || !store.shop || !store.accessToken) {
+      if (!store?.shop || !store?.accessToken) {
         return NextResponse.json(
           { skipped: true, reason: "store_not_found_or_incomplete" },
           { status: 200 }
         );
       }
 
-      // Ensure Pro/Enterprise for autoscan
+      // Pro/Enterprise only for autoscan
       let plan = "starter";
       try {
         const settings = await prisma.userSettings.findUnique({
@@ -110,7 +99,7 @@ export async function POST(req) {
       const result = await scanForStore({
         store,
         sessionEmail: store.userEmail || null,
-        enforceStarterLimit: false, // autoscan bypass (we already plan-check)
+        enforceStarterLimit: false,
       });
 
       const status = result.ok ? 200 : (result.statusCode || 500);
@@ -118,12 +107,10 @@ export async function POST(req) {
     }
   } catch (err) {
     console.error("Cron branch fatal:", err);
-    // fall through to manual mode
+    // fall through
   }
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  // 👤 Manual mode
-  // ─────────────────────────────────────────────────────────────────────────────
+  // ───────────────── Manual mode (from UI) ─────────────────
   try {
     let session = null;
     try {
@@ -145,9 +132,7 @@ export async function POST(req) {
     let store = null;
     try {
       if (session?.user?.email) {
-        store = await prisma.store.findFirst({
-          where: { userEmail: session.user.email },
-        });
+        store = await prisma.store.findFirst({ where: { userEmail: session.user.email } });
       }
       if (!store && shopCookie) {
         store = await prisma.store.findUnique({ where: { shop: shopCookie } });
@@ -180,11 +165,10 @@ export async function POST(req) {
 }
 
 /**
- * Runs the actual scan work for a given store.
- * Returns { ok: boolean, statusCode?: number, body: object }
+ * Do the work for one store.
  */
 async function scanForStore({ store, sessionEmail, enforceStarterLimit }) {
-  // Load settings (threshold + multi-location prefs)
+  // Load settings
   let userSettings = null;
   try {
     userSettings = await prisma.userSettings.findUnique({
@@ -202,7 +186,7 @@ async function scanForStore({ store, sessionEmail, enforceStarterLimit }) {
   const useMultiLocation = !!userSettings?.useMultiLocation && (plan === "pro" || plan === "enterprise");
   const selectedLocationIds = Array.isArray(userSettings?.locationIds) ? userSettings.locationIds : [];
 
-  // 🔒 Starter plan limit (manual mode only)
+  // Starter limit (manual)
   if (enforceStarterLimit) {
     try {
       if (plan === "starter") {
@@ -216,29 +200,25 @@ async function scanForStore({ store, sessionEmail, enforceStarterLimit }) {
             where: { userEmail: store.userEmail },
             data: { scanCount: 1, lastScanReset: now },
           });
-          console.log("🔄 Scan count reset and incremented");
         } else if ((userSettings?.scanCount ?? 0) >= 3) {
-          console.log("⛔️ Scan limit reached for Starter plan");
           return { ok: false, statusCode: 403, body: { error: "scan_limit_reached" } };
         } else {
           await prisma.userSettings.update({
             where: { userEmail: store.userEmail },
             data: { scanCount: { increment: 1 } },
           });
-          console.log("📈 Scan count incremented");
         }
       }
     } catch (e) {
-      console.warn("⚠️ Scan limit logic failed:", e?.message || e);
-      // Non-fatal; continue
+      console.warn("scan limit logic failed:", e?.message || e);
     }
   }
 
-  // ── Inventory via GraphQL (variants/products) ────────────────────────────────
+  // ── Inventory via GraphQL (no deprecated REST) ──
   let inventory = [];
   try {
     inventory = await getInventoryByVariantGQL(store.shop, store.accessToken, {
-      multiLocation: useMultiLocation, // includes per-location levels + sets systemQty to total when true
+      multiLocation: useMultiLocation, // if true, includes per-location levels and total
     });
     if (!Array.isArray(inventory)) inventory = [];
   } catch (e) {
@@ -250,7 +230,7 @@ async function scanForStore({ store, sessionEmail, enforceStarterLimit }) {
     };
   }
 
-  // If multi-location and specific locations selected, re-sum just those
+  // If multi-location and specific locations selected, re-sum to just those
   let inventoryForAlerts = inventory;
   try {
     if (useMultiLocation && selectedLocationIds.length > 0) {
@@ -269,7 +249,7 @@ async function scanForStore({ store, sessionEmail, enforceStarterLimit }) {
     inventoryForAlerts = inventory;
   }
 
-  // ── Sales map (REST for now) ────────────────────────────────────────────────
+  // ── Sales map (REST orders; fine) ──
   let salesMap = {};
   try {
     salesMap = await getSalesByVariant(store.shop, store.accessToken);
@@ -278,7 +258,7 @@ async function scanForStore({ store, sessionEmail, enforceStarterLimit }) {
     const msg = (e?.message || "").toLowerCase();
     const scopeIssue = msg.includes("401") || msg.includes("403");
     if (scopeIssue) {
-      salesMap = {};
+      salesMap = {}; // optional
     } else {
       console.error("Orders fetch failed:", e);
       return {
@@ -289,21 +269,17 @@ async function scanForStore({ store, sessionEmail, enforceStarterLimit }) {
     }
   }
 
-  // Compute alerts from engine
+  // Alerts
   let alerts = [];
   try {
     alerts = computeAlerts(inventoryForAlerts, salesMap) || [];
     if (!Array.isArray(alerts)) alerts = [];
   } catch (e) {
     console.error("computeAlerts failed:", e);
-    return {
-      ok: false,
-      statusCode: 500,
-      body: { error: "alerts_engine_failed", message: e?.message || String(e) },
-    };
+    return { ok: false, statusCode: 500, body: { error: "alerts_engine_failed", message: e?.message || String(e) } };
   }
 
-  // Add extra low-stock threshold alerts when not already covered
+  // Extra low-stock threshold
   try {
     alerts = mergeWithThresholdAlerts(alerts, inventoryForAlerts, lowStockThreshold);
   } catch (e) {
@@ -316,9 +292,7 @@ async function scanForStore({ store, sessionEmail, enforceStarterLimit }) {
       await prisma.$transaction(
         alerts.map((a) =>
           prisma.alert.upsert({
-            where: {
-              storeId_uniqueHash: { storeId: store.id, uniqueHash: makeUniqueHash(a) },
-            },
+            where: { storeId_uniqueHash: { storeId: store.id, uniqueHash: makeUniqueHash(a) } },
             update: {
               systemQty: a.systemQty,
               expectedMin: a.expectedMin,
@@ -343,15 +317,11 @@ async function scanForStore({ store, sessionEmail, enforceStarterLimit }) {
       );
     } catch (e) {
       console.error("Prisma upsert alerts failed:", e);
-      return {
-        ok: false,
-        statusCode: 500,
-        body: { error: "db_write_failed", message: e?.message || String(e) },
-      };
+      return { ok: false, statusCode: 500, body: { error: "db_write_failed", message: e?.message || String(e) } };
     }
   }
 
-  // ✅ Email notify (Pro/Enterprise) when alerts exist and a notification email is set
+  // Email notify (Pro/Enterprise)
   try {
     if (alerts.length > 0) {
       const to = userSettings?.notificationEmail;
@@ -359,39 +329,32 @@ async function scanForStore({ store, sessionEmail, enforceStarterLimit }) {
         const high = alerts.filter((a) => a.severity === "high").length;
         const med = alerts.length - high;
 
-        const html = `
-          <div style="font-family:system-ui,Segoe UI,Roboto,Arial">
-            <h2>Ghost Stock – ${alerts.length} new alert${alerts.length === 1 ? "" : "s"}</h2>
-            <p>Shop: <b>${store.shop}</b></p>
-            <p>High: <b>${high}</b> • Medium: <b>${med}</b></p>
-            <p><a href="https://ghost-stock.co.uk/dashboard">Open dashboard</a></p>
-            <hr/>
-            <p style="color:#666;font-size:12px">You’re receiving this because email alerts are enabled in Settings.</p>
-          </div>
-        `;
-
         await sendAlertEmail({
           to,
           subject: `Ghost Stock – ${alerts.length} new alert${alerts.length === 1 ? "" : "s"}`,
-          html,
+          html: `
+            <div style="font-family:system-ui,Segoe UI,Roboto,Arial">
+              <h2>Ghost Stock – ${alerts.length} new alert${alerts.length === 1 ? "" : "s"}</h2>
+              <p>Shop: <b>${store.shop}</b></p>
+              <p>High: <b>${high}</b> • Medium: <b>${med}</b></p>
+              <p><a href="https://ghost-stock.co.uk/dashboard">Open dashboard</a></p>
+              <hr/>
+              <p style="color:#666;font-size:12px">You’re receiving this because email alerts are enabled in Settings.</p>
+            </div>
+          `,
           text: `New alerts: ${alerts.length} (High: ${high}, Med: ${med}) – https://ghost-stock.co.uk/dashboard`,
         });
       }
     }
   } catch (e) {
     console.warn("[scan] email notify failed:", e?.message || e);
-    // non-fatal
   }
 
   // Touch lastScanAt
   try {
-    await prisma.store.update({
-      where: { id: store.id },
-      data: { lastScanAt: new Date() },
-    });
+    await prisma.store.update({ where: { id: store.id }, data: { lastScanAt: new Date() } });
   } catch (e) {
     console.warn("Prisma update lastScanAt failed:", e?.message || e);
-    // non-fatal
   }
 
   return { ok: true, body: { created_or_updated: alerts.length } };

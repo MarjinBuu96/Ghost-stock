@@ -3,6 +3,8 @@ export const runtime = "nodejs";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getActiveStore } from "@/lib/getActiveStore";
+import { shopifyGraphqlUrl } from "@/lib/shopifyApi";
+
 
 export async function GET(req) {
   try {
@@ -39,7 +41,7 @@ export async function GET(req) {
       }
     `;
 
-    import { shopifyGraphqlUrl } from "@/lib/shopifyApi";
+    
     const resp = await fetch(shopifyGraphqlUrl(store.shop), {
       method: "POST",
       headers: {

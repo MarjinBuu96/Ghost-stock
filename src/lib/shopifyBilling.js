@@ -1,4 +1,7 @@
 // src/lib/shopifyBilling.js
+
+import { shopifyGraphqlUrl } from "@/lib/shopifyApi";
+
 export const BILLING = {
   plans: {
     starter: { amount: 9,  currencyCode: "GBP", trialDays: 7, features: ["Manual scan", "KPIs", "CSV"] },
@@ -8,7 +11,7 @@ export const BILLING = {
 };
 
 async function gql(shop, token, query, variables = {}) {
-   import { shopifyGraphqlUrl } from "@/lib/shopifyApi";
+   
    const res = await fetch(shopifyGraphqlUrl(shop), {
     method: "POST",
     headers: {
