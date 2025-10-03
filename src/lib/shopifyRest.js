@@ -1,9 +1,11 @@
 // src/lib/shopifyRest.js
+import { getInventoryByVariantGQL } from "@/lib/shopifyGraphql";
 
-// Centralize API version in one place
+// Centralize Admin API version here as well (orders REST still used)
 const API_VERSION = "2025-07";
 
-// ---------- tiny retry helper ----------
+/* --------------------------------- helpers -------------------------------- */
+
 async function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
@@ -23,19 +25,16 @@ async function fetchWithRetry(url, opts = {}, tries = 5) {
       await sleep(retryAfter ? retryAfter * 1000 : attempt * 500);
       continue;
     }
-    return res; // let caller decide
+    return res;
   }
 }
 
-// ---------- utils ----------
 function normalizePathOrUrl(shop, pathOrUrl) {
-  // Accept either: "products.json" OR "https://.../admin/api/XXXX-YY/products.json"
   if (/^https?:\/\//i.test(pathOrUrl)) {
     const u = new URL(pathOrUrl);
-    // keep querystring if present
     return u.toString();
   }
-  return `https://${shop}/admin/api/${API_VERSION}/${pathOrUrl.replace(/^\/+/, "")}`;
+  return `https://${shop}/admin/api/${API_VERSION}/${String(pathOrUrl).replace(/^\/+/, "")}`;
 }
 
 function buildUrl(shop, path, search = {}) {
@@ -49,11 +48,9 @@ function buildUrl(shop, path, search = {}) {
 function nextLinkFromHeaders(headers) {
   const link = headers.get("link") || headers.get("Link") || "";
   if (!link) return null;
-  // Shopify may send multiple link rels. Find "rel=\"next\"".
   const m = link.match(/<([^>]+)>\s*;\s*rel="next"/i);
   if (!m) return null;
   try {
-    // ensure it’s an absolute URL
     const u = new URL(m[1]);
     return u.toString();
   } catch {
@@ -61,14 +58,16 @@ function nextLinkFromHeaders(headers) {
   }
 }
 
-function toNumber(n, fallback = 0) {
-  if (n == null || n === "") return fallback;
-  const x = Number(n);
-  return Number.isFinite(x) ? x : fallback;
-}
+/* ----------------------------- low-level GET ------------------------------ */
 
-// ---------- low-level GET ----------
 export async function shopifyGetRaw(shop, token, pathOrUrl, search = {}) {
+  // 🚫 Belt-and-braces: block deprecated product/variant REST endpoints
+  const asString = String(pathOrUrl || "");
+  const forbidden = /\/(products|variants)\.json(?:$|[?#])/i;
+  if (forbidden.test(asString)) {
+    throw new Error("Blocked deprecated Shopify REST endpoint: " + asString);
+  }
+
   const url = buildUrl(shop, pathOrUrl, search);
   const res = await fetchWithRetry(url, {
     headers: {
@@ -79,67 +78,34 @@ export async function shopifyGetRaw(shop, token, pathOrUrl, search = {}) {
 
   const text = await res.text().catch(() => "");
   let body = text;
-  try {
-    body = text ? JSON.parse(text) : {};
-  } catch {
-    // leave as raw text if not JSON
-  }
+  try { body = text ? JSON.parse(text) : {}; } catch {}
 
-  return {
-    ok: res.ok,
-    status: res.status,
-    body,
-    headers: res.headers,
-    text,
-    url,
-  };
+  return { ok: res.ok, status: res.status, body, headers: res.headers, text, url };
 }
 
-// ---------- inventory (single-location fallback from variant.inventory_quantity) ----------
-export async function getInventoryByVariant(shop, token) {
-  const rows = [];
-  let pageUrl = buildUrl(shop, "products.json", { limit: "250" });
+/* --------------------- inventory (now uses GraphQL) ----------------------- */
 
-  while (pageUrl) {
-    const { ok, status, body, headers, text, url } = await shopifyGetRaw(
-      shop,
-      token,
-      pageUrl // accept full URL
-    );
-
-    if (!ok) {
-      throw new Error(
-        `GET ${url} -> HTTP ${status}${
-          typeof body === "string" ? ` ${body}` : text ? ` ${text}` : ""
-        }`
-      );
-    }
-
-    const products = Array.isArray(body?.products) ? body.products : [];
-    for (const p of products) {
-      const variants = Array.isArray(p?.variants) ? p.variants : [];
-      for (const v of variants) {
-        rows.push({
-          sku: v?.sku || `${p?.id}-${v?.id}`,
-          product: p?.title ?? "",
-          variantId: v?.id ?? null,
-          inventory_item_id: v?.inventory_item_id ?? null,
-          systemQty: typeof v?.inventory_quantity === "number" ? v.inventory_quantity : 0,
-          price: toNumber(v?.price, 0),
-        });
-      }
-    }
-
-    pageUrl = nextLinkFromHeaders(headers);
-  }
-
-  return rows;
+/**
+ * getInventoryByVariant
+ * Wrapper that uses GraphQL under the hood (no deprecated REST).
+ * Returns: [{ sku, product, variantId, inventory_item_id, systemQty }]
+ */
+export async function getInventoryByVariant(shop, accessToken) {
+  return getInventoryByVariantGQL(shop, accessToken, { multiLocation: false });
 }
 
-// ---------- orders → sales velocity (paginated) ----------
+/**
+ * Multi-location aggregation via GraphQL inventoryLevels
+ */
+export async function getInventoryByVariantMultiLocation(shop, accessToken) {
+  return getInventoryByVariantGQL(shop, accessToken, { multiLocation: true });
+}
+
+/* ---------------- orders → sales velocity (REST is fine) ------------------ */
+
 /**
  * Returns a map { skuOrVariantKey: quantitySold } for the last `daysBack` days.
- * Requires `read_orders` scope. Caller should catch 401/403 and treat as optional.
+ * Requires `read_orders` scope. Caller may treat 401/403 as "optional".
  */
 export async function getSalesByVariant(shop, token, daysBack = 14) {
   const since = new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000).toISOString();
@@ -166,11 +132,7 @@ export async function getSalesByVariant(shop, token, daysBack = 14) {
     }
 
     let body = {};
-    try {
-      body = text ? JSON.parse(text) : {};
-    } catch {
-      body = {};
-    }
+    try { body = text ? JSON.parse(text) : {}; } catch {}
 
     const orders = Array.isArray(body?.orders) ? body.orders : [];
     for (const o of orders) {
@@ -192,109 +154,4 @@ export async function getSalesByVariant(shop, token, daysBack = 14) {
   }
 
   return Object.fromEntries(sales);
-}
-
-// ---------- inventory snapshot (+ optional multi-location via inventory_levels) ----------
-export async function getInventorySnapshot(shop, accessToken, { multiLocation = false } = {}) {
-  const rows = [];
-  let pageUrl = buildUrl(shop, "products.json", {
-    limit: "250",
-    fields: "id,title,variants",
-  });
-
-  const headers = {
-    "X-Shopify-Access-Token": accessToken,
-    "Content-Type": "application/json",
-  };
-
-  while (pageUrl) {
-    const r = await fetchWithRetry(pageUrl, { headers });
-    const text = await r.text().catch(() => "");
-    if (!r.ok) throw new Error(`Products fetch failed ${r.status}${text ? ` ${text}` : ""}`);
-
-    let json = {};
-    try {
-      json = text ? JSON.parse(text) : {};
-    } catch {
-      json = {};
-    }
-
-    for (const p of json.products || []) {
-      for (const v of p.variants || []) {
-        rows.push({
-          product: p.title,
-          variantId: v.id,
-          inventory_item_id: v.inventory_item_id,
-          sku: v.sku || "",
-          price: toNumber(v.price, 0),
-          systemQty: typeof v.inventory_quantity === "number" ? v.inventory_quantity : 0, // fallback
-        });
-      }
-    }
-
-    pageUrl = nextLinkFromHeaders(r.headers);
-  }
-
-  if (!multiLocation || rows.length === 0) {
-    return rows;
-  }
-
-  // Sum inventory_levels across ALL locations per inventory_item_id
-  const byItem = new Map(); // inventory_item_id -> total available
-  const itemIds = rows.map((r) => r.inventory_item_id).filter(Boolean);
-
-  const chunk = (arr, size) =>
-    arr.reduce((a, _, i) => (i % size ? a : [...a, arr.slice(i, i + size)]), []);
-
-  try {
-    for (const ids of chunk(itemIds, 50)) {
-      let next = buildUrl(shop, "inventory_levels.json", {
-        inventory_item_ids: ids.join(","),
-        limit: "250",
-      });
-
-      while (next) {
-        const res = await fetchWithRetry(next, { headers });
-        const txt = await res.text().catch(() => "");
-        if (!res.ok)
-          throw new Error(
-            `inventory_levels fetch failed ${res.status}${txt ? ` ${txt}` : ""}`
-          );
-
-        let data = {};
-        try {
-          data = txt ? JSON.parse(txt) : {};
-        } catch {
-          data = {};
-        }
-
-        for (const lvl of data.inventory_levels || []) {
-          const id = lvl.inventory_item_id;
-          const available = typeof lvl.available === "number" ? lvl.available : 0;
-          byItem.set(id, (byItem.get(id) || 0) + available);
-        }
-
-        next = nextLinkFromHeaders(res.headers);
-      }
-    }
-
-    // apply totals to rows
-    for (const r of rows) {
-      const sum = byItem.get(r.inventory_item_id);
-      if (typeof sum === "number") r.systemQty = sum;
-    }
-  } catch (e) {
-    console.warn(
-      "Multi-location inventory_levels failed, falling back:",
-      e?.message || e
-    );
-    // silently fall back to variant.inventory_quantity
-  }
-
-  return rows;
-}
-
-// Convenience adapter used by /api/shopify/scan for Pro/Enterprise
-export async function getInventoryByVariantMultiLocation(shop, accessToken) {
-  return getInventorySnapshot(shop, accessToken, { multiLocation: true });
 }
