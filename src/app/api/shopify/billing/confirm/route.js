@@ -39,7 +39,8 @@ export async function GET(req) {
       }
     `;
 
-    const resp = await fetch(`https://${store.shop}/admin/api/2025-07/graphql.json`, {
+    import { shopifyGraphqlUrl } from "@/lib/shopifyApi";
+    const resp = await fetch(shopifyGraphqlUrl(store.shop), {
       method: "POST",
       headers: {
         "X-Shopify-Access-Token": store.accessToken,

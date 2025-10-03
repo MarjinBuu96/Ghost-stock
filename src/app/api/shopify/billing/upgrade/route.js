@@ -5,7 +5,7 @@ import { cookies, headers as nextHeaders } from "next/headers";
 import { prisma } from "@/lib/prisma";
 import { getActiveSubscriptions } from "@/lib/shopifyBilling";
 
-const API_VERSION = "2025-07";
+import { SHOPIFY_API_VERSION, shopifyGraphqlUrl, shopifyRestUrl } from "@/lib/shopifyApi";
 const ALLOWED_PLANS = ["starter", "starter_annual", "pro", "pro_annual"];
 
 /** Decode admin host param to shop domain */

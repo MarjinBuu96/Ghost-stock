@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { cookies, headers as nextHeaders } from "next/headers";
 
-const API_VERSION = "2025-07";
+import { SHOPIFY_API_VERSION, shopifyGraphqlUrl, shopifyRestUrl } from "@/lib/shopifyApi";
 
 function getShopFromRequest(req) {
   try {
