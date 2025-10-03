@@ -1,4 +1,4 @@
-// src/app/dashboard.js 
+// src/app/dashboard.js
 "use client";
 
 import useSWR from "swr";
@@ -41,6 +41,33 @@ function DashboardInner() {
   const [countingIds, setCountingIds] = useState(() => new Set());
   const [hasScanned, setHasScanned] = useState(false);
   const [billingBusy, setBillingBusy] = useState(false);
+
+  // Helper to consistently get host (URL first, then cookie, then state)
+  const getHost = () => {
+    try {
+      const urlHost = new URLSearchParams(location.search).get("host");
+      if (urlHost) return urlHost;
+    } catch {}
+    const cookieHost = document.cookie.match(/(?:^|;\s*)shopifyHost=([^;]+)/)?.[1] || "";
+    if (cookieHost) return cookieHost;
+    return host || "";
+  };
+
+  // Quick helpers to build settings links with host preserved
+  const settingsHref = useMemo(() => {
+    const h = getHost();
+    return h ? `/settings?host=${encodeURIComponent(h)}` : "/settings";
+  }, [host]);
+
+  const settingsBillingHref = useMemo(() => {
+    const h = getHost();
+    return h ? `/settings?host=${encodeURIComponent(h)}#billing` : "/settings#billing";
+  }, [host]);
+
+  const settingsIntegrationsHref = useMemo(() => {
+    const h = getHost();
+    return h ? `/settings?host=${encodeURIComponent(h)}#integrations` : "/settings#integrations";
+  }, [host]);
 
   // App Bridge init + tokenized fetch
   useEffect(() => {
@@ -99,7 +126,7 @@ function DashboardInner() {
       return originalFetch(input, init);
     };
 
-    // ✅ cleanup
+    // cleanup
     return () => {
       window.fetch = originalFetch;
     };
@@ -256,7 +283,9 @@ function DashboardInner() {
       }
       if (payload?.error === "no_store") {
         alert("No Shopify store connected yet. Head to Settings to connect your shop.");
-        window.location.href = "/settings";
+        // ❗ Preserve host to avoid middleware bounce
+        const h = getHost();
+        window.location.href = h ? `/settings?host=${encodeURIComponent(h)}` : "/settings";
         return;
       }
       alert("Scan failed. Please try again.");
@@ -277,14 +306,13 @@ function DashboardInner() {
     await Promise.all([mutateSettings(), mutateKpis()]);
   }
 
-  // ✅ Robust billing start that works in embedded Admin
+  // Robust billing start; if not embedded, send to settings (with host if present)
   async function upgradeTo(planName) {
     try {
       setBillingBusy(true);
 
-      // If not embedded (no host), send to Settings where the flow is available
       if (!isEmbedded || !host) {
-        window.location.href = "/settings#billing";
+        window.location.href = settingsBillingHref;
         return;
       }
 
@@ -302,9 +330,7 @@ function DashboardInner() {
         throw new Error(json?.error || "Upgrade failed");
       }
 
-      // Open Shopify billing approval outside the iframe (most reliable)
       window.open(json.confirmationUrl, "_blank", "noopener,noreferrer");
-
       setShowUpgradeModal(false);
     } catch (e) {
       console.warn(e);
@@ -314,7 +340,7 @@ function DashboardInner() {
     }
   }
 
-  // ✅ One-time autorun scan after first embed and store present
+  // One-time autorun scan after first embed and store present
   useEffect(() => {
     if (!hasStore) return;
     if (hasScanned) return;
@@ -376,7 +402,7 @@ function DashboardInner() {
               <p className="text-sm text-gray-400">Store connected</p>
               <p className="text-lg font-semibold">{stores[0].shop}</p>
             </div>
-            <a href="/settings" className="text-sm underline hover:text-green-400">
+            <a href={settingsHref} className="text-sm underline hover:text-green-400">
               Manage
             </a>
           </div>
@@ -387,7 +413,7 @@ function DashboardInner() {
               <p className="text-gray-300">Connect your store to generate real ghost-stock alerts.</p>
             </div>
             <a
-              href="/settings"
+              href={settingsHref}
               className="bg-green-500 hover:bg-green-600 text-black px-4 py-2 rounded font-semibold text-sm"
             >
               Connect Store
@@ -424,7 +450,7 @@ function DashboardInner() {
           }${!emailConfigured ? "Email" : ""} to receive proactive notifications.`}
         >
           <a
-            href="/settings#integrations"
+            href={settingsIntegrationsHref}
             className="px-3 py-2 rounded bg-gray-700 hover:bg-gray-600 text-sm font-semibold"
           >
             Go to Integrations
@@ -446,7 +472,7 @@ function DashboardInner() {
             {billingBusy ? "Starting…" : "Upgrade to Pro"}
           </button>
           <a
-            href="/settings#billing"
+            href={settingsBillingHref}
             className="px-3 py-2 rounded bg-gray-700 hover:bg-gray-600 text-sm font-semibold"
           >
             Compare plans
@@ -461,7 +487,7 @@ function DashboardInner() {
           body="Great! Here are quick ways to keep things clean:"
         >
           <a
-            href="/settings#integrations"
+            href={settingsIntegrationsHref}
             className="px-3 py-2 rounded bg-gray-700 hover:bg-gray-600 text-sm font-semibold"
           >
             Enable Slack/Email
@@ -715,7 +741,7 @@ function DashboardInner() {
               <ul className="list-disc pl-5 text-sm text-blue-100 mt-2 space-y-1">
                 <li>Run another scan after a few sales to keep things fresh.</li>
                 <li>
-                  Enable <a href="/settings#integrations" className="underline">Slack/Email alerts</a> so you don’t miss changes.
+                  Enable <a href={settingsIntegrationsHref} className="underline">Slack/Email alerts</a> so you don’t miss changes.
                 </li>
                 <li>Use “Start Count” on suspicious SKUs to confirm on-hand quickly.</li>
               </ul>
