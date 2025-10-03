@@ -1,27 +1,16 @@
 // src/lib/shopifyGraphql.js
+import { shopifyGraphqlUrl } from "@/lib/shopifyApi";
 
-// Keep a single source of truth for Admin API version
-export const SHOPIFY_API_VERSION = process.env.SHOPIFY_API_VERSION || "2025-07";
-
-export function gidToId(gid) {
-  // "gid://shopify/InventoryItem/123456789" -> "123456789"
-  if (!gid || typeof gid !== "string") return null;
-  const parts = gid.split("/");
-  return parts.length ? parts[parts.length - 1] : null;
-}
-
-export async function shopifyGraphQL(shop, accessToken, query, variables = {}) {
-  const resp = await fetch(
-    `https://${shop}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Shopify-Access-Token": accessToken,
-      },
-      body: JSON.stringify({ query, variables }),
-    }
-  );
+/** Low-level GraphQL POST */
+async function gql(shop, accessToken, query, variables = {}) {
+  const resp = await fetch(shopifyGraphqlUrl(shop), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Shopify-Access-Token": accessToken,
+    },
+    body: JSON.stringify({ query, variables }),
+  });
 
   const json = await resp.json().catch(() => ({}));
   if (!resp.ok || json.errors) {
@@ -32,20 +21,19 @@ export async function shopifyGraphQL(shop, accessToken, query, variables = {}) {
 }
 
 /**
- * Fetch variants via GraphQL and return:
- * [{ variantId, sku, product, systemQty, inventory_item_id (numeric string), inventoryItemIdGid }]
- *
- * - When multiLocation=false: uses node.inventoryQuantity.
+ * Fetch all variants via GraphQL.
+ * Returns: [{ variantId, sku, product, systemQty, price, inventory_item_id, levels?[] }]
+ * - When multiLocation=false: uses variant.inventoryQuantity.
  * - When multiLocation=true: sums inventoryLevels.available across locations.
  */
 export async function getInventoryByVariantGQL(
   shop,
   accessToken,
-  { multiLocation = false, pageSize = 100, maxVariants = 10000 } = {}
+  { multiLocation = false, pageSize = 100 } = {}
 ) {
-  const QUERY = `
-    query Variants($first: Int!, $after: String) {
-      productVariants(first: $first, after: $after) {
+  const query = `
+    query Variants($pageSize: Int!, $cursor: String) {
+      productVariants(first: $pageSize, after: $cursor) {
         pageInfo { hasNextPage }
         edges {
           cursor
@@ -53,6 +41,7 @@ export async function getInventoryByVariantGQL(
             id
             sku
             title
+            price
             product { title }
             inventoryQuantity
             inventoryItem {
@@ -61,6 +50,7 @@ export async function getInventoryByVariantGQL(
               inventoryLevels(first: 50) {
                 nodes {
                   available
+                  location { id name }
                 }
               }` : ``}
             }
@@ -70,42 +60,42 @@ export async function getInventoryByVariantGQL(
     }
   `;
 
-  const out = [];
-  let after = null;
+  const items = [];
+  let cursor = null;
   let hasNext = true;
 
   while (hasNext) {
-    const data = await shopifyGraphQL(shop, accessToken, QUERY, { first: pageSize, after });
+    const data = await gql(shop, accessToken, query, { pageSize, cursor });
     const conn = data?.productVariants;
     const edges = conn?.edges || [];
 
     for (const { node: v } of edges) {
       const levels = multiLocation
-        ? (v.inventoryItem?.inventoryLevels?.nodes || [])
+        ? (v.inventoryItem?.inventoryLevels?.nodes || []).map((l) => ({
+            locationId: l.location?.id || null,
+            locationName: l.location?.name || "",
+            available: Number(l.available ?? 0),
+          }))
         : null;
 
       const systemQty = multiLocation
-        ? (levels || []).reduce((sum, l) => sum + (Number(l?.available ?? 0) || 0), 0)
-        : (typeof v.inventoryQuantity === "number" ? v.inventoryQuantity : 0);
+        ? (levels || []).reduce((sum, l) => sum + (l.available || 0), 0)
+        : (typeof v.inventoryQuantity === "number" ? v.inventoryQuantity : Number(v.inventoryQuantity ?? 0));
 
-      const inventoryItemIdGid = v?.inventoryItem?.id || null;
-
-      out.push({
-        variantId: v.id,                                    // gid
+      items.push({
+        variantId: v.id,
         sku: v.sku || "",
         product: v.product?.title || v.title || "",
         systemQty,
-        inventory_item_id: gidToId(inventoryItemIdGid),     // numeric as string for compatibility
-        inventoryItemIdGid,                                  // original gid if you need it
+        price: Number(v.price ?? 0),           // ✅ expose price for At-Risk revenue
+        inventory_item_id: v.inventoryItem?.id || null,
+        ...(multiLocation ? { levels } : {}),
       });
-
-      if (out.length >= maxVariants) break;
     }
 
-    if (out.length >= maxVariants) break;
     hasNext = !!conn?.pageInfo?.hasNextPage;
-    after = hasNext && edges.length ? edges[edges.length - 1].cursor : null;
+    cursor = hasNext && edges.length ? edges[edges.length - 1].cursor : null;
   }
 
-  return out;
+  return items;
 }

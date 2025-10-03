@@ -29,9 +29,9 @@ async function fetchWithRetry(url, opts = {}, tries = 5) {
 
 function normalizePathOrUrl(shop, pathOrUrl) {
   const s = String(pathOrUrl || "");
-  // If it's already a full URL (e.g., a Link header "next" URL), keep it.
+  // Full URL (e.g., Link header "next") → keep as-is.
   if (/^https?:\/\//i.test(s)) return s;
-  // Otherwise build an absolute REST URL via our helper.
+  // Otherwise build via our central helper (keeps API version consistent).
   return shopifyRestUrl(shop, s.replace(/^\/+/, ""));
 }
 
@@ -53,12 +53,6 @@ function nextLinkFromHeaders(headers) {
   } catch {
     return null;
   }
-}
-
-function toNumber(n, fallback = 0) {
-  if (n == null || n === "") return fallback;
-  const x = Number(n);
-  return Number.isFinite(x) ? x : fallback;
 }
 
 /* ----------------------------- low-level GET ----------------------------- */
@@ -89,9 +83,9 @@ export async function shopifyGetRaw(shop, token, pathOrUrl, search = {}) {
 
 /* -------------------- INVENTORY (GraphQL-backed) -------------------- */
 
-/** 
+/**
  * Snapshot used by callers expecting a REST-like shape.
- * Returns [{ sku, product, variantId, inventory_item_id, systemQty, (levels?) }]
+ * Returns [{ sku, product, variantId, inventory_item_id, systemQty, price, (levels?) }]
  */
 export async function getInventorySnapshot(
   shop,
@@ -107,6 +101,7 @@ export async function getInventorySnapshot(
       it.inventory_item_id ??
       (typeof it.inventoryItemId !== "undefined" ? it.inventoryItemId : null),
     systemQty: Number(it.systemQty ?? 0),
+    price: Number(it.price ?? 0), // ✅ needed for At-Risk revenue
     ...(multiLocation && Array.isArray(it.levels) ? { levels: it.levels } : {}),
   }));
 }
