@@ -174,3 +174,6 @@ export async function deleteVariant(shop, accessToken, variantId) {
   `;
   return gql(shop, accessToken, mutation, { id: gid("ProductVariant", variantId) });
 }
+
+export { gql as shopifyGraphql };
+
