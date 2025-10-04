@@ -3,7 +3,7 @@ export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { getActiveStore } from "@/lib/getActiveStore";
-import { shopifyGraphql } from "@/lib/shopifyGraphql";
+import { shopifyGraphql, getInventoryByVariantGQL } from "@/lib/shopifyGraphql";
 
 export async function GET(req) {
   try {
@@ -25,53 +25,12 @@ export async function GET(req) {
       return NextResponse.json({ items: [], count: 0, error: "invalid_token" });
     }
 
-    // ✅ Token is valid, fetch inventory snapshot via GraphQL
-    const inventoryQuery = `
-      {
-        products(first: 50) {
-          edges {
-            node {
-              id
-              title
-              variants(first: 10) {
-                edges {
-                  node {
-                    id
-                    title
-                    inventoryQuantity
-                    inventoryItem {
-                      id
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    `;
-
-    const inventoryRes = await shopifyGraphql(store.shop, store.accessToken, inventoryQuery);
-
-    if (!inventoryRes?.products?.edges) {
-      console.warn("debug/inventory fetch failed:", inventoryRes?.errors || "no products");
-      return NextResponse.json({ items: [], count: 0, error: "inventory_fetch_failed" });
-    }
-
-    const items = inventoryRes.products.edges.map(({ node }) => ({
-      id: node.id,
-      title: node.title,
-      variants: node.variants.edges.map(({ node: variant }) => ({
-        id: variant.id,
-        title: variant.title,
-        quantity: variant.inventoryQuantity,
-        inventoryItemId: variant.inventoryItem?.id || null,
-      })),
-    }));
+    // ✅ Token is valid, fetch inventory snapshot via hardened helper
+    const rows = await getInventoryByVariantGQL(store.shop, store.accessToken, { multiLocation: true });
 
     return NextResponse.json({
-      items,
-      count: items.length,
+      items: rows.slice(0, 50),
+      count: rows.length,
     });
   } catch (e) {
     console.warn("debug/inventory error:", e?.message || e);
