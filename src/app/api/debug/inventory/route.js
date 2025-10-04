@@ -3,9 +3,7 @@ export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { getActiveStore } from "@/lib/getActiveStore";
-import { getInventorySnapshot } from "@/lib/shopifyRest";
-
-const SHOPIFY_API_VERSION = "2025-07";
+import { shopifyGraphql, getInventoryByVariantGQL } from "@/lib/shopifyGraphql";
 
 export async function GET(req) {
   try {
@@ -18,30 +16,17 @@ export async function GET(req) {
 
     console.log("🔑 Using access token:", store.accessToken);
 
-    // 🔍 Validate token with lightweight request
-    const testRes = await fetch(`https://${store.shop}/admin/api/${SHOPIFY_API_VERSION}/shop.json`, {
-      headers: {
-        "X-Shopify-Access-Token": store.accessToken,
-        "Content-Type": "application/json",
-      },
-    });
+    // 🔍 Validate token with lightweight GraphQL query
+    const pingQuery = `{ shop { name } }`;
+    const pingRes = await shopifyGraphql(store.shop, store.accessToken, pingQuery);
 
-    if (!testRes.ok) {
-      const errorData = await testRes.json().catch(() => ({}));
-      console.warn("debug/token-check failed:", testRes.status, errorData);
-
-      // 🔁 Redirect to re-auth if token is invalid
-      if (testRes.status === 401) {
-        const reauthUrl = new URL("/api/auth", req.url);
-        reauthUrl.searchParams.set("shop", store.shop);
-        return NextResponse.redirect(reauthUrl);
-      }
-
+    if (!pingRes?.shop?.name) {
+      console.warn("debug/token-check failed:", pingRes?.errors || "no shop name");
       return NextResponse.json({ items: [], count: 0, error: "invalid_token" });
     }
 
-    // ✅ Token is valid, proceed with inventory fetch
-    const rows = await getInventorySnapshot(store.shop, store.accessToken, { multiLocation: true });
+    // ✅ Token is valid, fetch inventory snapshot via hardened helper
+    const rows = await getInventoryByVariantGQL(store.shop, store.accessToken, { multiLocation: true });
 
     return NextResponse.json({
       items: rows.slice(0, 50),
