@@ -3,9 +3,7 @@ export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { getActiveStore } from "@/lib/getActiveStore";
-import { getInventorySnapshot } from "@/lib/shopifyRest";
-
-const SHOPIFY_API_VERSION = "2025-07";
+import { shopifyGraphql } from "@/lib/shopifyGraphql";
 
 export async function GET(req) {
   try {
@@ -18,34 +16,62 @@ export async function GET(req) {
 
     console.log("🔑 Using access token:", store.accessToken);
 
-    // 🔍 Validate token with lightweight request
-    const testRes = await fetch(`https://${store.shop}/admin/api/${SHOPIFY_API_VERSION}/shop.json`, {
-      headers: {
-        "X-Shopify-Access-Token": store.accessToken,
-        "Content-Type": "application/json",
-      },
-    });
+    // 🔍 Validate token with lightweight GraphQL query
+    const pingQuery = `{ shop { name } }`;
+    const pingRes = await shopifyGraphql(store.shop, store.accessToken, pingQuery);
 
-    if (!testRes.ok) {
-      const errorData = await testRes.json().catch(() => ({}));
-      console.warn("debug/token-check failed:", testRes.status, errorData);
-
-      // 🔁 Redirect to re-auth if token is invalid
-      if (testRes.status === 401) {
-        const reauthUrl = new URL("/api/auth", req.url);
-        reauthUrl.searchParams.set("shop", store.shop);
-        return NextResponse.redirect(reauthUrl);
-      }
-
+    if (!pingRes?.data?.shop?.name) {
+      console.warn("debug/token-check failed:", pingRes?.errors || "no shop name");
       return NextResponse.json({ items: [], count: 0, error: "invalid_token" });
     }
 
-    // ✅ Token is valid, proceed with inventory fetch
-    const rows = await getInventorySnapshot(store.shop, store.accessToken, { multiLocation: true });
+    // ✅ Token is valid, fetch inventory snapshot via GraphQL
+    const inventoryQuery = `
+      {
+        products(first: 50) {
+          edges {
+            node {
+              id
+              title
+              variants(first: 10) {
+                edges {
+                  node {
+                    id
+                    title
+                    inventoryQuantity
+                    inventoryItem {
+                      id
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    `;
+
+    const inventoryRes = await shopifyGraphql(store.shop, store.accessToken, inventoryQuery);
+
+    if (!inventoryRes?.data?.products?.edges) {
+      console.warn("debug/inventory fetch failed:", inventoryRes?.errors || "no products");
+      return NextResponse.json({ items: [], count: 0, error: "inventory_fetch_failed" });
+    }
+
+    const items = inventoryRes.data.products.edges.map(({ node }) => ({
+      id: node.id,
+      title: node.title,
+      variants: node.variants.edges.map(({ node: variant }) => ({
+        id: variant.id,
+        title: variant.title,
+        quantity: variant.inventoryQuantity,
+        inventoryItemId: variant.inventoryItem?.id || null,
+      })),
+    }));
 
     return NextResponse.json({
-      items: rows.slice(0, 50),
-      count: rows.length,
+      items,
+      count: items.length,
     });
   } catch (e) {
     console.warn("debug/inventory error:", e?.message || e);
