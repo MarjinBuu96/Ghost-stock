@@ -45,7 +45,6 @@ export async function getInventoryByVariantGQL(
               inventoryLevels(first: 50) {
                 nodes {
                   location { id name }
-                  stockedQuantity
                 }
               }` : ``}
             }
@@ -65,12 +64,10 @@ export async function getInventoryByVariantGQL(
         ? (v.inventoryItem?.inventoryLevels?.nodes || []).map(l => ({
             locationId: l.location?.id || null,
             locationName: l.location?.name || "",
-            available: Number(l.stockedQuantity ?? 0),
+            available: null, // Quantity not exposed per location
           }))
         : null;
-      const systemQty = multiLocation
-        ? (levels || []).reduce((s, l) => s + (l.available || 0), 0)
-        : (typeof v.inventoryQuantity === "number" ? v.inventoryQuantity : 0);
+      const systemQty = typeof v.inventoryQuantity === "number" ? v.inventoryQuantity : 0;
       items.push({
         variantId: v.id,
         sku: v.sku || "",
@@ -85,6 +82,7 @@ export async function getInventoryByVariantGQL(
   }
   return items;
 }
+
 
 
 
