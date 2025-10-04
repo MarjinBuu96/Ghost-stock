@@ -43,7 +43,10 @@ export async function getInventoryByVariantGQL(
               id
               ${multiLocation ? `
               inventoryLevels(first: 50) {
-                nodes { available location { id name } }
+                nodes {
+                  quantities { availableQuantity }
+                  location { id name }
+                }
               }` : ``}
             }
           }
@@ -62,7 +65,7 @@ export async function getInventoryByVariantGQL(
         ? (v.inventoryItem?.inventoryLevels?.nodes || []).map(l => ({
             locationId: l.location?.id || null,
             locationName: l.location?.name || "",
-            available: Number(l.available ?? 0),
+            available: Number(l.quantities?.availableQuantity ?? 0),
           }))
         : null;
       const systemQty = multiLocation
@@ -82,6 +85,7 @@ export async function getInventoryByVariantGQL(
   }
   return items;
 }
+
 
 /** ===== PRODUCTS ===== */
 
