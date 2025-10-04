@@ -2,7 +2,7 @@
 import 'server-only';
 
 import { prisma } from './prisma';
-import { getInventoryByVariant, getSalesByVariant } from './shopifyRest';
+import { getInventoryByVariantGQL, getSalesByVariantGQL } from './shopifyGraphql';
 import { computeAlerts } from './alertsEngine';
 import { publish } from './kpiBus';
 import { computeKpisForUser } from './kpis';
@@ -23,7 +23,7 @@ export async function runScanForStore(store) {
   // 1) Inventory (required)
   let inventory = [];
   try {
-    inventory = await getInventoryByVariant(store.shop, store.accessToken);
+    inventory = await getInventoryByVariantGQL(store.shop, store.accessToken, { multiLocation: true });
   } catch (e) {
     return { ok: false, error: `inventory_error:${e?.message || e}`, alerts: 0 };
   }
@@ -31,7 +31,7 @@ export async function runScanForStore(store) {
   // 2) Sales (optional)
   let salesMap = {};
   try {
-    salesMap = await getSalesByVariant(store.shop, store.accessToken);
+    salesMap = await getSalesByVariantGQL(store.shop, store.accessToken);
   } catch (e) {
     const msg = (e?.message || '').toLowerCase();
     const missingScope = msg.includes('401') || msg.includes('403');
