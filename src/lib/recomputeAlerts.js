@@ -1,4 +1,4 @@
-import { getInventoryByVariant, getSalesByVariant } from "@/lib/shopifyRest";
+import { getInventoryByVariantGQL, getSalesByVariantGQL } from "@/lib/shopifyGraphql";
 import { computeAlerts } from "@/lib/alertsEngine";
 import { prisma } from "@/lib/prisma";
 
@@ -10,22 +10,19 @@ function makeUniqueHash(a) {
 
 export async function recomputeForStore(store, userEmail) {
   const [inventory, salesMap] = await Promise.all([
-    getInventoryByVariant(store.shop, store.accessToken),
-    getSalesByVariant(store.shop, store.accessToken),
+    getInventoryByVariantGQL(store.shop, store.accessToken, { multiLocation: true }),
+    getSalesByVariantGQL(store.shop, store.accessToken),
   ]);
 
   const alerts = computeAlerts(inventory, salesMap);
 
-  // Upsert with dedupe key (storeId + uniqueHash)
   const ops = alerts.map((a) => {
     const uniqueHash = makeUniqueHash(a);
     return prisma.alert.upsert({
       where: {
-        // Prisma will generate this compound unique input from @@unique([storeId, uniqueHash])
         storeId_uniqueHash: { storeId: store.id, uniqueHash },
       },
       update: {
-        // keep most recent numbers/severity
         systemQty: a.systemQty,
         expectedMin: a.expectedMin,
         expectedMax: a.expectedMax,
@@ -54,13 +51,10 @@ export async function recomputeForStore(store, userEmail) {
     where: {
       storeId: store.id,
       status: "open",
-      // very light filter (string starts-with) to limit to today’s hashes
       uniqueHash: { startsWith: `|` }, // placeholder; skip if you don't want closing
     },
     data: { status: "resolved" },
   });
-  // Note: the above "startsWith" trick needs a consistent prefix to be useful.
-  // You can skip closing stale in MVP.
 
   await prisma.$transaction(ops);
   return alerts.length;
