@@ -96,45 +96,58 @@ export async function shopifyGetRaw(shop, token, pathOrUrl, search = {}) {
 }
 
 // ---------- inventory (single-location fallback from variant.inventory_quantity) ----------
+import { shopifyGraphql } from "@/lib/shopifyGraphql";
+
 export async function getInventoryByVariant(shop, token) {
-  const rows = [];
-  let pageUrl = buildUrl(shop, "products.json", { limit: "250" });
-
-  while (pageUrl) {
-    const { ok, status, body, headers, text, url } = await shopifyGetRaw(
-      shop,
-      token,
-      pageUrl // accept full URL
-    );
-
-    if (!ok) {
-      throw new Error(
-        `GET ${url} -> HTTP ${status}${
-          typeof body === "string" ? ` ${body}` : text ? ` ${text}` : ""
-        }`
-      );
-    }
-
-    const products = Array.isArray(body?.products) ? body.products : [];
-    for (const p of products) {
-      const variants = Array.isArray(p?.variants) ? p.variants : [];
-      for (const v of variants) {
-        rows.push({
-          sku: v?.sku || `${p?.id}-${v?.id}`,
-          product: p?.title ?? "",
-          variantId: v?.id ?? null,
-          inventory_item_id: v?.inventory_item_id ?? null,
-          systemQty: typeof v?.inventory_quantity === "number" ? v.inventory_quantity : 0,
-          price: toNumber(v?.price, 0),
-        });
+  const query = `
+    query Variants($first: Int!, $after: String) {
+      productVariants(first: $first, after: $after) {
+        pageInfo { hasNextPage }
+        edges {
+          cursor
+          node {
+            id
+            sku
+            price
+            inventoryQuantity
+            product { title }
+            inventoryItem { id }
+          }
+        }
       }
     }
+  `;
 
-    pageUrl = nextLinkFromHeaders(headers);
+  const rows = [];
+  let after = null, hasNext = true;
+
+  while (hasNext) {
+    const data = await shopifyGraphql(shop, token, query, {
+      first: 100,
+      after,
+    });
+
+    const conn = data?.productVariants;
+    const edges = conn?.edges || [];
+
+    for (const { node: v } of edges) {
+      rows.push({
+        sku: v.sku || "",
+        product: v.product?.title || "",
+        variantId: v.id,
+        inventory_item_id: v.inventoryItem?.id || null,
+        systemQty: Number.isFinite(v.inventoryQuantity) ? v.inventoryQuantity : 0,
+        price: Number(v.price) || 0,
+      });
+    }
+
+    hasNext = !!conn?.pageInfo?.hasNextPage;
+    after = hasNext && edges.length ? edges[edges.length - 1].cursor : null;
   }
 
   return rows;
 }
+
 
 // ---------- orders → sales velocity (paginated) ----------
 /**
