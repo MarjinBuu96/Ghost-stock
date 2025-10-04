@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { getInventoryByVariant } from "@/lib/shopifyRest";
+import { getInventoryByVariantGQL } from "@/lib/shopifyGraphql";
 
 export async function computeKpisForUser(userEmail) {
   const alerts = await prisma.alert.findMany({
@@ -11,7 +11,7 @@ export async function computeKpisForUser(userEmail) {
   const priceMap = new Map();
   try {
     if (store?.shop && store?.accessToken) {
-      const inv = await getInventoryByVariant(store.shop, store.accessToken);
+      const inv = await getInventoryByVariantGQL(store.shop, store.accessToken, { multiLocation: true });
       for (const row of inv) priceMap.set(row.sku || String(row.variantId), Number(row.price) || 0);
     }
   } catch {}
