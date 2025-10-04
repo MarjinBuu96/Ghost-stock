@@ -71,7 +71,7 @@ export async function getInventoryByVariantGQL(
       items.push({
         variantId: v.id,
         sku: v.sku || "",
-        product: v.product?.title || v.title || "",
+        product: v.product?.title || "",
         systemQty,
         inventory_item_id: v.inventoryItem?.id || null,
         ...(multiLocation ? { levels } : {}),
@@ -82,6 +82,7 @@ export async function getInventoryByVariantGQL(
   }
   return items;
 }
+
 
 
 
