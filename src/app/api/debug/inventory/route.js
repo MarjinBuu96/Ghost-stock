@@ -20,7 +20,7 @@ export async function GET(req) {
     const pingQuery = `{ shop { name } }`;
     const pingRes = await shopifyGraphql(store.shop, store.accessToken, pingQuery);
 
-    if (!pingRes?.data?.shop?.name) {
+    if (!pingRes?.shop?.name) {
       console.warn("debug/token-check failed:", pingRes?.errors || "no shop name");
       return NextResponse.json({ items: [], count: 0, error: "invalid_token" });
     }
@@ -53,12 +53,12 @@ export async function GET(req) {
 
     const inventoryRes = await shopifyGraphql(store.shop, store.accessToken, inventoryQuery);
 
-    if (!inventoryRes?.data?.products?.edges) {
+    if (!inventoryRes?.products?.edges) {
       console.warn("debug/inventory fetch failed:", inventoryRes?.errors || "no products");
       return NextResponse.json({ items: [], count: 0, error: "inventory_fetch_failed" });
     }
 
-    const items = inventoryRes.data.products.edges.map(({ node }) => ({
+    const items = inventoryRes.products.edges.map(({ node }) => ({
       id: node.id,
       title: node.title,
       variants: node.variants.edges.map(({ node: variant }) => ({
